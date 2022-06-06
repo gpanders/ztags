@@ -1,15 +1,38 @@
 const std = @import("std");
 
-const MyStruct = struct {
-    foo: []const u8,
-};
+const Options = @import("Options.zig");
+const Tags = @import("Tags.zig");
 
-var global_var: u32 = 42;
-
-fn sayHello() void {
-    std.debug.print("Hello world!\n", .{});
+fn usage() void {
+    std.debug.print("Usage: {s} [-o OUTPUT] FILES...\n", .{std.os.argv[0]});
 }
 
-pub fn main() anyerror!void {
-    sayHello();
+pub fn main() anyerror!u8 {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+
+    var allocator = arena.allocator();
+
+    var options = a: {
+        var rc: u8 = 0;
+        break :a Options.parse(allocator, &rc) catch |err| switch (err) {
+            error.InvalidOption,
+            error.MissingArguments,
+            => {
+                usage();
+                return rc;
+            },
+            else => return err,
+        };
+    };
+
+    var tags = Tags.init(allocator);
+
+    for (options.arguments) |fname| {
+        try tags.findTags(fname);
+    }
+
+    try tags.write(options.output);
+
+    return 0;
 }
