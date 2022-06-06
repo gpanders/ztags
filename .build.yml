@@ -10,5 +10,5 @@ tasks:
         # Don't run on GitHub PRs
         [ "$BUILD_REASON" != 'github-pr' ] || complete-build
     - mirror: |
-        cd zig-tags
-        git push --force --mirror git@github.com:gpanders/zig-tags
+        cd ztags
+        git push --force --mirror git@github.com:gpanders/ztags
