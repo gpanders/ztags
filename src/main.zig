@@ -29,7 +29,12 @@ pub fn main() anyerror!u8 {
     var tags = Tags.init(allocator);
 
     for (options.arguments) |fname| {
-        try tags.findTags(fname);
+        const full_fname = if (std.fs.path.isAbsolute(fname))
+            fname
+        else
+            try std.fs.cwd().realpathAlloc(allocator, fname);
+        std.debug.print("{s}\n", .{full_fname});
+        try tags.findTags(full_fname);
     }
 
     try tags.write(options.output);
