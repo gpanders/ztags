@@ -25,7 +25,10 @@ pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
     var next_option: ?OptionField = null;
     while (args.next()) |arg| {
         if (std.mem.startsWith(u8, arg, "-")) {
-            if (options_map.get(arg[1..])) |opt| {
+            if (arg.len < 2) {
+                rc.* = 1;
+                return error.InvalidOption;
+            } else if (options_map.get(arg[1..])) |opt| {
                 next_option = opt;
             } else {
                 rc.* = if (std.mem.eql(u8, arg[1..], "h")) 0 else 1;
@@ -34,7 +37,7 @@ pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
         } else if (next_option) |opt| {
             switch (opt) {
                 .output => options.output = arg,
-                .arguments => unreachable,
+                else => unreachable,
             }
             next_option = null;
         } else {
