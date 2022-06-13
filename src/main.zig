@@ -26,7 +26,7 @@ pub fn main() anyerror!u8 {
         };
     };
 
-    var tags = Tags.init(allocator);
+    var tags = Tags.init(&arena);
 
     for (options.arguments) |fname| {
         const full_fname = if (std.fs.path.isAbsolute(fname))

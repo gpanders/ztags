@@ -21,15 +21,15 @@ const Entry = struct {
     kind: Kind,
 };
 
-allocator: std.mem.Allocator,
+arena: *std.heap.ArenaAllocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
 
-pub fn init(allocator: std.mem.Allocator) Tags {
+pub fn init(arena: *std.heap.ArenaAllocator) Tags {
     return Tags{
-        .allocator = allocator,
+        .arena = arena,
         .entries = .{},
-        .visited = std.StringHashMap(void).init(allocator),
+        .visited = std.StringHashMap(void).init(arena.allocator()),
     };
 }
 
@@ -52,7 +52,8 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     };
     defer std.os.munmap(source);
 
-    var ast = try std.zig.parse(self.allocator, std.meta.assumeSentinel(source, 0));
+    var allocator = self.arena.allocator();
+    var ast = try std.zig.parse(allocator, std.meta.assumeSentinel(source, 0));
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
     const data = ast.nodes.items(.data);
@@ -66,11 +67,11 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                     const name = std.mem.trim(u8, ast.tokenSlice(name_index), "\"");
                     if (std.mem.endsWith(u8, name, ".zig")) {
                         const dir = std.fs.path.dirname(fname) orelse continue;
-                        const import_fname = try std.fmt.allocPrint(self.allocator, "{s}/{s}", .{
+                        const import_fname = try std.fmt.allocPrint(allocator, "{s}/{s}", .{
                             dir,
                             name,
                         });
-                        const resolved = try std.fs.path.resolve(self.allocator, &.{
+                        const resolved = try std.fs.path.resolve(allocator, &.{
                             import_fname,
                         });
                         self.findTags(resolved) catch |err| switch (err) {
@@ -85,8 +86,8 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                 const name = ast.tokenSlice(name_token);
                 const offset = ast.tokens.items(.start)[name_token];
                 const loc = std.zig.findLineColumn(source, offset);
-                try self.entries.append(self.allocator, .{
-                    .ident = try self.allocator.dupe(u8, name),
+                try self.entries.append(allocator, .{
+                    .ident = try allocator.dupe(u8, name),
                     .filename = fname,
                     .kind = .function,
                     .loc = .{
@@ -123,8 +124,8 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                 };
                 const offset = ast.tokens.items(.start)[name_token];
                 const loc = std.zig.findLineColumn(source, offset);
-                try self.entries.append(self.allocator, .{
-                    .ident = try self.allocator.dupe(u8, name),
+                try self.entries.append(allocator, .{
+                    .ident = try allocator.dupe(u8, name),
                     .filename = fname,
                     .kind = kind,
                     .loc = .{
@@ -147,8 +148,8 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                 }
                 const offset = ast.tokens.items(.start)[name_token];
                 const loc = std.zig.findLineColumn(source, offset);
-                try self.entries.append(self.allocator, .{
-                    .ident = try self.allocator.dupe(u8, name),
+                try self.entries.append(allocator, .{
+                    .ident = try allocator.dupe(u8, name),
                     .filename = fname,
                     .kind = .field,
                     .loc = .{
@@ -163,7 +164,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 }
 
 pub fn write(self: *Tags, output: []const u8) !void {
-    var contents = std.ArrayList(u8).init(self.allocator);
+    var contents = std.ArrayList(u8).init(self.arena.allocator());
     var writer = contents.writer();
 
     try writer.writeAll(
