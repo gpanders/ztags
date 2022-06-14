@@ -32,6 +32,16 @@ For example, the entire Zig standard library can be indexed using:
 $ ztags /path/to/zig/std/std.zig
 ```
 
+The following "kinds" are supported:
+
+- `enum`
+- `field`
+- `struct`
+- `constant`
+- `function`
+- `variable`
+- `union`
+
 ## License
 
 MIT

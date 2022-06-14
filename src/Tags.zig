@@ -9,6 +9,7 @@ const Kind = enum {
     field,
     @"struct",
     @"enum",
+    @"union",
     variable,
     constant,
 };
@@ -115,14 +116,22 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                         .container_decl_two_trailing,
                         .container_decl_arg,
                         .container_decl_arg_trailing,
-                        => kind = .@"struct",
+                        => {
+                            const container_type = ast.tokenSlice(tokens[rhs]);
+                            kind = switch (container_type[0]) {
+                                's' => .@"struct",
+                                'e' => .@"enum",
+                                'u' => .@"union",
+                                else => continue,
+                            };
+                        },
                         .tagged_union,
                         .tagged_union_trailing,
                         .tagged_union_two,
                         .tagged_union_two_trailing,
                         .tagged_union_enum_tag,
                         .tagged_union_enum_tag_trailing,
-                        => kind = .@"enum",
+                        => kind = .@"union",
                         .builtin_call_two => if (std.mem.eql(u8, ast.tokenSlice(tokens[rhs]), "@import")) {
                             // Ignore variables of the form
                             //   const foo = @import("foo");
