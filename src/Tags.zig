@@ -8,16 +8,15 @@ const Kind = enum {
     function,
     field,
     @"struct",
+    @"enum",
     variable,
+    constant,
 };
 
 const Entry = struct {
     ident: []const u8,
     filename: []const u8,
-    loc: struct {
-        line: usize,
-        column: usize,
-    },
+    text: []const u8,
     kind: Kind,
 };
 
@@ -40,7 +39,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     }
     gop.value_ptr.* = {};
 
-    const source = a: {
+    const mapped = a: {
         var file = try std.fs.cwd().openFile(fname, .{});
         defer file.close();
 
@@ -50,19 +49,23 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
         }
         break :a try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
     };
-    defer std.os.munmap(source);
+    defer std.os.munmap(mapped);
+
+    const source = std.meta.assumeSentinel(mapped, 0);
 
     var allocator = self.arena.allocator();
-    var ast = try std.zig.parse(allocator, std.meta.assumeSentinel(source, 0));
+    var ast = try std.zig.parse(allocator, source);
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
     const data = ast.nodes.items(.data);
     for (tags) |node, i| {
+        var ident: ?[]const u8 = null;
+        var kind: ?Kind = null;
+
         switch (node) {
             .builtin_call_two => {
-                const main_token = tokens[i];
-                const token = ast.tokenSlice(main_token);
-                if (std.mem.eql(u8, token[1..], "import")) {
+                const builtin = ast.tokenSlice(tokens[i]);
+                if (std.mem.eql(u8, builtin[1..], "import")) {
                     const name_index = tokens[data[i].lhs];
                     const name = std.mem.trim(u8, ast.tokenSlice(name_index), "\"");
                     if (std.mem.endsWith(u8, name, ".zig")) {
@@ -71,46 +74,40 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                             dir,
                             name,
                         });
-                        const resolved = try std.fs.path.resolve(allocator, &.{
-                            import_fname,
-                        });
+                        const resolved = try std.fs.path.resolve(allocator, &.{import_fname});
                         self.findTags(resolved) catch |err| switch (err) {
                             error.FileNotFound => continue,
                             else => return err,
                         };
                     }
                 }
+                continue;
             },
             .fn_decl => {
-                const name_token = tokens[i] + 1;
-                const name = ast.tokenSlice(name_token);
-                const offset = ast.tokens.items(.start)[name_token];
-                const loc = std.zig.findLineColumn(source, offset);
-                try self.entries.append(allocator, .{
-                    .ident = try allocator.dupe(u8, name),
-                    .filename = fname,
-                    .kind = .function,
-                    .loc = .{
-                        .line = loc.line,
-                        .column = loc.column,
-                    },
-                });
+                ident = ast.tokenSlice(tokens[i] + 1);
+                kind = .function;
             },
             .global_var_decl,
             .simple_var_decl,
             .local_var_decl,
             .aligned_var_decl,
             => {
-                const name_token = tokens[i] + 1;
-                var name = ast.tokenSlice(name_token);
+                var name = ast.tokenSlice(tokens[i] + 1);
                 if (std.mem.eql(u8, name, "_")) {
                     continue;
                 }
                 if (std.mem.startsWith(u8, name, "@\"")) {
                     name = std.mem.trim(u8, name[1..], "\"");
                 }
-                const kind = switch (data[i].rhs) {
-                    0 => Kind.variable,
+
+                ident = name;
+                kind = if (std.mem.eql(u8, ast.tokenSlice(tokens[i]), "const"))
+                    .constant
+                else
+                    .variable;
+
+                switch (data[i].rhs) {
+                    0 => {},
                     else => |rhs| switch (tags[rhs]) {
                         .container_decl,
                         .container_decl_trailing,
@@ -118,48 +115,57 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                         .container_decl_two_trailing,
                         .container_decl_arg,
                         .container_decl_arg_trailing,
-                        => Kind.@"struct",
-                        else => Kind.variable,
+                        => kind = .@"struct",
+                        .tagged_union,
+                        .tagged_union_trailing,
+                        .tagged_union_two,
+                        .tagged_union_two_trailing,
+                        .tagged_union_enum_tag,
+                        .tagged_union_enum_tag_trailing,
+                        => kind = .@"enum",
+                        .builtin_call_two => if (std.mem.eql(u8, ast.tokenSlice(tokens[rhs]), "@import")) {
+                            // Ignore variables of the form
+                            //   const foo = @import("foo");
+                            // Having these as tags is generally not useful and creates a lot of
+                            // redundant noise
+                            continue;
+                        },
+                        .field_access => {
+                            // Ignore variables of the form
+                            //      const foo = SomeContainer.foo
+                            // i.e. when the name of the variable is just an alias to some field
+                            const identifier_token = ast.tokenSlice(data[rhs].rhs);
+                            if (std.mem.eql(u8, identifier_token, name)) {
+                                continue;
+                            }
+                        },
+                        else => {},
                     },
-                };
-                const offset = ast.tokens.items(.start)[name_token];
-                const loc = std.zig.findLineColumn(source, offset);
-                try self.entries.append(allocator, .{
-                    .ident = try allocator.dupe(u8, name),
-                    .filename = fname,
-                    .kind = kind,
-                    .loc = .{
-                        .line = loc.line,
-                        .column = loc.column,
-                    },
-                });
+                }
             },
             .container_field_init,
             .container_field_align,
             .container_field,
             => {
-                const name_token = tokens[i];
-                var name = ast.tokenSlice(name_token);
+                var name = ast.tokenSlice(tokens[i]);
                 if (std.mem.eql(u8, name, "_")) {
                     continue;
                 }
                 if (std.mem.startsWith(u8, name, "@\"")) {
                     name = std.mem.trim(u8, name[1..], "\"");
                 }
-                const offset = ast.tokens.items(.start)[name_token];
-                const loc = std.zig.findLineColumn(source, offset);
-                try self.entries.append(allocator, .{
-                    .ident = try allocator.dupe(u8, name),
-                    .filename = fname,
-                    .kind = .field,
-                    .loc = .{
-                        .line = loc.line,
-                        .column = loc.column,
-                    },
-                });
+                ident = name;
+                kind = .field;
             },
             else => continue,
         }
+
+        try self.entries.append(allocator, .{
+            .ident = try allocator.dupe(u8, ident.?),
+            .filename = fname,
+            .kind = kind.?,
+            .text = try getNodeText(allocator, ast, @intCast(u32, i)),
+        });
     }
 }
 
@@ -180,11 +186,10 @@ pub fn write(self: *Tags, output: []const u8) !void {
     }.lessThan);
 
     for (self.entries.items) |entry| {
-        try writer.print("{s}\t{s}\tcall cursor({d}, {d})|;\"\t{s}\n", .{
+        try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
             entry.ident,
             entry.filename,
-            entry.loc.line + 1,
-            entry.loc.column + 1,
+            entry.text,
             @tagName(entry.kind),
         });
     }
@@ -193,4 +198,19 @@ pub fn write(self: *Tags, output: []const u8) !void {
     defer file.close();
 
     try file.writeAll(contents.items);
+}
+
+fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ![]const u8 {
+    const token_starts = tree.tokens.items(.start);
+    const first_token = tree.firstToken(node);
+    const last_token = tree.lastToken(node);
+    const start = token_starts[first_token];
+    const end = token_starts[last_token] + tree.tokenSlice(last_token).len;
+    const text = std.mem.sliceTo(tree.source[start..end], '\n');
+    const start_of_line = if (start > 0 and tree.source[start - 1] == '\n') "^" else "";
+    const end_of_line = if (start + text.len < tree.source.len and tree.source[start + text.len] == '\n')
+        "$"
+    else
+        "";
+    return try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
 }
