@@ -195,10 +195,23 @@ pub fn write(self: *Tags, output: []const u8) !void {
     }.lessThan);
 
     for (self.entries.items) |entry| {
+        const text = if (std.mem.indexOfScalar(u8, entry.text, '/')) |_| a: {
+            var text = try std.ArrayList(u8).initCapacity(self.arena.allocator(), entry.text.len);
+            for (entry.text) |c| {
+                if (c == '/') {
+                    try text.append('\\');
+                }
+
+                try text.append(c);
+            }
+
+            break :a text.toOwnedSlice();
+        } else entry.text;
+
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
             entry.ident,
             entry.filename,
-            entry.text,
+            text,
             @tagName(entry.kind),
         });
     }
