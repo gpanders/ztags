@@ -1,5 +1,7 @@
 # ztags
 
+[![](https://github.com/gpanders/ztags/actions/workflows/CI.yml/badge.svg)](https://github.com/gpanders/ztags/actions)
+
 Generate tags files for Zig projects.
 
 Unlike `ctags`, this does not use regular expressions, but instead analyzes the
