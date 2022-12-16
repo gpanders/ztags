@@ -15,6 +15,9 @@ bit slow. To build a release build use
 $ zig build -Drelease-safe
 ```
 
+The `master` branch tracks Zig `HEAD`. Use the `0.10.0` branch if using a
+stable release.
+
 ## Usage
 
 Pass a source file to the `ztags` executable. `ztags` will find `@import`
