@@ -184,7 +184,7 @@ pub fn write(self: *Tags, output: []const u8) !void {
 
     try writer.writeAll(
         \\!_TAG_FILE_SORTED	1	/1 = sorted/
-        \\!_TAG_FILE_ENCODING	utf-8	
+        \\!_TAG_FILE_ENCODING	utf-8
         \\
     );
 
@@ -205,7 +205,7 @@ pub fn write(self: *Tags, output: []const u8) !void {
                 try text.append(c);
             }
 
-            break :a text.toOwnedSlice();
+            break :a try text.toOwnedSlice();
         } else entry.text;
 
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{

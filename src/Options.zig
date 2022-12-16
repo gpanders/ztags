@@ -50,6 +50,6 @@ pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
         return error.MissingArguments;
     }
 
-    options.arguments = arguments.toOwnedSlice();
+    options.arguments = try arguments.toOwnedSlice();
     return options;
 }
