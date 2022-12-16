@@ -21,15 +21,15 @@ const Entry = struct {
     kind: Kind,
 };
 
-arena: *std.heap.ArenaAllocator,
+allocator: std.mem.Allocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
 
-pub fn init(arena: *std.heap.ArenaAllocator) Tags {
-    return Tags{
-        .arena = arena,
+pub fn init(allocator: std.mem.Allocator) Tags {
+    return .{
+        .allocator = allocator,
         .entries = .{},
-        .visited = std.StringHashMap(void).init(arena.allocator()),
+        .visited = std.StringHashMap(void).init(allocator),
     };
 }
 
@@ -44,17 +44,23 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
         var file = try std.fs.cwd().openFile(fname, .{});
         defer file.close();
 
-        const size = try file.getEndPos();
+        const metadata = try file.metadata();
+        const size = metadata.size();
         if (size == 0) {
             return;
         }
+
+        if (metadata.kind() == .Directory) {
+            return error.NotFile;
+        }
+
         break :a try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
     };
     defer std.os.munmap(mapped);
 
     const source = std.meta.assumeSentinel(mapped, 0);
 
-    var allocator = self.arena.allocator();
+    var allocator = self.allocator;
     var ast = try std.zig.parse(allocator, source);
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
@@ -179,7 +185,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 }
 
 pub fn write(self: *Tags, output: []const u8) !void {
-    var contents = std.ArrayList(u8).init(self.arena.allocator());
+    var contents = std.ArrayList(u8).init(self.allocator);
     var writer = contents.writer();
 
     try writer.writeAll(
@@ -196,7 +202,7 @@ pub fn write(self: *Tags, output: []const u8) !void {
 
     for (self.entries.items) |entry| {
         const text = if (std.mem.indexOfScalar(u8, entry.text, '/')) |_| a: {
-            var text = try std.ArrayList(u8).initCapacity(self.arena.allocator(), entry.text.len);
+            var text = try std.ArrayList(u8).initCapacity(self.allocator, entry.text.len);
             for (entry.text) |c| {
                 if (c == '/') {
                     try text.append('\\');

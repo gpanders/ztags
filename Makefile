@@ -1,9 +1,6 @@
 
 build:
-	zig build -Drelease-fast
+	zig build
 
 fmt:
 	zig fmt --check .
-
-test: fmt
-	zig build test
