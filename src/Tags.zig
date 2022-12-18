@@ -44,10 +44,16 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
         var file = try std.fs.cwd().openFile(fname, .{});
         defer file.close();
 
-        const size = try file.getEndPos();
+        const metadata = try file.metadata();
+        const size = metadata.size();
         if (size == 0) {
             return;
         }
+
+        if (metadata.kind() == .Directory) {
+            return error.NotFile;
+        }
+
         break :a try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
     };
     defer std.os.munmap(mapped);
