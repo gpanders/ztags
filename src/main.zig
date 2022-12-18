@@ -33,7 +33,16 @@ pub fn main() anyerror!u8 {
             fname
         else
             try std.fs.cwd().realpathAlloc(allocator, fname);
-        try tags.findTags(full_fname);
+        tags.findTags(full_fname) catch |err| switch (err) {
+            error.NotFile => {
+                try std.io.getStdErr().writer().print(
+                    "Error: {s} is a directory. Arguments must be Zig source files.\n",
+                    .{full_fname},
+                );
+                return 22; // EINVAL
+            },
+            else => return err,
+        };
     }
 
     try tags.write(options.output);
