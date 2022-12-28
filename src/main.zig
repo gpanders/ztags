@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 
 const Options = @import("Options.zig");
@@ -8,10 +9,13 @@ fn usage() void {
 }
 
 pub fn main() anyerror!u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var base_allocator = switch (builtin.mode) {
+        .Debug => std.heap.GeneralPurposeAllocator(.{}){},
+        else => std.heap.ArenaAllocator.init(std.heap.page_allocator),
+    };
+    defer _ = base_allocator.deinit();
 
-    var allocator = arena.allocator();
+    var allocator = base_allocator.allocator();
 
     var options = a: {
         var rc: u8 = 0;
