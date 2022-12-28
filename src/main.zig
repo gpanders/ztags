@@ -25,14 +25,18 @@ pub fn main() anyerror!u8 {
             else => return err,
         };
     };
+    defer options.deinit(allocator);
 
-    var tags = Tags.init(&arena);
+    var tags = Tags.init(allocator);
+    defer tags.deinit();
 
     for (options.arguments) |fname| {
         const full_fname = if (std.fs.path.isAbsolute(fname))
             fname
         else
             try std.fs.cwd().realpathAlloc(allocator, fname);
+        defer if (fname.ptr != full_fname.ptr) allocator.free(full_fname);
+
         tags.findTags(full_fname) catch |err| switch (err) {
             error.NotFile => {
                 try std.io.getStdErr().writer().print(
