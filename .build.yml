@@ -1,11 +1,15 @@
 image: alpine/edge
 packages:
     - git
+    - zig
 secrets:
     - 78f39fb6-1185-492f-9c21-f755e10b5e5d # ssh key for mirroring
 environment:
     GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=no
 tasks:
+    - test: |
+        cd ztags
+        zig build test
     - mirror: |
         # Don't run on GitHub PRs
         if [ "$BUILD_REASON" = 'github-pr' ]; then
