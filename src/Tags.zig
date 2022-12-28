@@ -19,18 +19,33 @@ const Entry = struct {
     filename: []const u8,
     text: []const u8,
     kind: Kind,
+
+    // filename is borrowed, ident and text are owned
+    fn deinit(self: Entry, allocator: std.mem.Allocator) void {
+        allocator.free(self.ident);
+        allocator.free(self.text);
+    }
 };
 
-arena: *std.heap.ArenaAllocator,
+allocator: std.mem.Allocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
 
-pub fn init(arena: *std.heap.ArenaAllocator) Tags {
+pub fn init(allocator: std.mem.Allocator) Tags {
     return Tags{
-        .arena = arena,
+        .allocator = allocator,
         .entries = .{},
-        .visited = std.StringHashMap(void).init(arena.allocator()),
+        .visited = std.StringHashMap(void).init(allocator),
     };
+}
+
+pub fn deinit(self: *Tags) void {
+    for (self.entries.items) |entry| {
+        entry.deinit(self.allocator);
+    }
+
+    self.entries.deinit(self.allocator);
+    self.visited.deinit();
 }
 
 pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
@@ -60,8 +75,10 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 
     const source = std.meta.assumeSentinel(mapped, 0);
 
-    var allocator = self.arena.allocator();
+    var allocator = self.allocator;
     var ast = try std.zig.parse(allocator, source);
+    defer ast.deinit(allocator);
+
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
     const data = ast.nodes.items(.data);
@@ -81,7 +98,11 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                             dir,
                             name,
                         });
+                        defer allocator.free(import_fname);
+
                         const resolved = try std.fs.path.resolve(allocator, &.{import_fname});
+                        defer allocator.free(resolved);
+
                         self.findTags(resolved) catch |err| switch (err) {
                             error.FileNotFound => continue,
                             else => return err,
@@ -185,7 +206,9 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 }
 
 pub fn write(self: *Tags, output: []const u8) !void {
-    var contents = std.ArrayList(u8).init(self.arena.allocator());
+    var contents = std.ArrayList(u8).init(self.allocator);
+    defer contents.deinit();
+
     var writer = contents.writer();
 
     try writer.writeAll(
@@ -202,7 +225,7 @@ pub fn write(self: *Tags, output: []const u8) !void {
 
     for (self.entries.items) |entry| {
         const text = if (std.mem.indexOfScalar(u8, entry.text, '/')) |_| a: {
-            var text = try std.ArrayList(u8).initCapacity(self.arena.allocator(), entry.text.len);
+            var text = try std.ArrayList(u8).initCapacity(self.allocator, entry.text.len);
             for (entry.text) |c| {
                 if (c == '/') {
                     try text.append('\\');
@@ -213,6 +236,7 @@ pub fn write(self: *Tags, output: []const u8) !void {
 
             break :a text.toOwnedSlice();
         } else entry.text;
+        defer if (text.ptr != entry.text.ptr) self.allocator.free(text);
 
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
             entry.ident,
