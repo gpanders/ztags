@@ -57,3 +57,7 @@ pub fn main() anyerror!u8 {
 
     return 0;
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}
