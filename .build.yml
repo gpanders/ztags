@@ -6,9 +6,14 @@ secrets:
 environment:
     GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=no
 tasks:
-    - nopr: |
-        # Don't run on GitHub PRs
-        [ "$BUILD_REASON" != 'github-pr' ] || complete-build
     - mirror: |
-        cd ztags
+        # Don't run on GitHub PRs
+        if [ "$BUILD_REASON" = 'github-pr' ]; then
+            exit
+        fi
+
+        git clone --mirror https://git.sr.ht/~gpanders/ztags ztags.git
+        cd ztags.git
         git push --force --mirror git@github.com:gpanders/ztags
+        cd ..
+        rm -rf ztags.git
