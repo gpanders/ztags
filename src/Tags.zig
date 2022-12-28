@@ -20,9 +20,9 @@ const Entry = struct {
     text: []const u8,
     kind: Kind,
 
-    // filename is borrowed, ident and text are owned
     fn deinit(self: Entry, allocator: std.mem.Allocator) void {
         allocator.free(self.ident);
+        allocator.free(self.filename);
         allocator.free(self.text);
     }
 };
@@ -198,7 +198,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 
         try self.entries.append(allocator, .{
             .ident = try allocator.dupe(u8, ident.?),
-            .filename = fname,
+            .filename = try allocator.dupe(u8, fname),
             .kind = kind.?,
             .text = try getNodeText(allocator, ast, @intCast(u32, i)),
         });
