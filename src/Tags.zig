@@ -231,6 +231,16 @@ pub fn write(self: *Tags, output: []const u8) !void {
         null;
     defer if (cwd) |c| self.allocator.free(c);
 
+    // Cache relative paths to avoid recalculating for the same absolute path. If the relative paths
+    // option is not enabled this has no cost other than some stack space and a couple of no-op
+    // function calls
+    var relative_paths = std.StringHashMap([]const u8).init(self.allocator);
+    defer {
+        var it = relative_paths.valueIterator();
+        while (it.next()) |val| self.allocator.free(val.*);
+        relative_paths.deinit();
+    }
+
     for (self.entries.items) |entry| {
         const text = if (std.mem.indexOfScalar(u8, entry.text, '/')) |_| a: {
             var text = try std.ArrayList(u8).initCapacity(self.allocator, entry.text.len);
@@ -246,11 +256,14 @@ pub fn write(self: *Tags, output: []const u8) !void {
         } else entry.text;
         defer if (text.ptr != entry.text.ptr) self.allocator.free(text);
 
-        const filename = if (cwd) |c|
-            try std.fs.path.relative(self.allocator, c, entry.filename)
-        else
-            entry.filename;
-        defer if (filename.ptr != entry.filename.ptr) self.allocator.free(filename);
+        const filename = if (cwd) |c| a: {
+            const gop = try relative_paths.getOrPut(entry.filename);
+            if (!gop.found_existing) {
+                gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, entry.filename);
+            }
+
+            break :a gop.value_ptr.*;
+        } else entry.filename;
 
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
             entry.ident,
