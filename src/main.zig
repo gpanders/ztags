@@ -5,7 +5,7 @@ const Options = @import("Options.zig");
 const Tags = @import("Tags.zig");
 
 fn usage() void {
-    std.debug.print("Usage: {s} [-o OUTPUT] FILES...\n", .{std.os.argv[0]});
+    std.debug.print("Usage: {s} [-o OUTPUT] [-r] FILES...\n", .{std.os.argv[0]});
 }
 
 pub fn main() anyerror!u8 {
@@ -31,7 +31,7 @@ pub fn main() anyerror!u8 {
     };
     defer options.deinit(allocator);
 
-    var tags = Tags.init(allocator);
+    var tags = Tags.init(allocator, options.relative);
     defer tags.deinit();
 
     for (options.arguments) |fname| {
