@@ -246,6 +246,10 @@ pub fn write(self: *Tags, output: []const u8) !void {
         });
     }
 
+    if (std.mem.eql(u8, output, "-")) {
+        return try std.io.getStdOut().writeAll(contents.items);
+    }
+
     var file = try std.fs.cwd().createFile(output, .{});
     defer file.close();
 
