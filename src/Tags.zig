@@ -30,12 +30,14 @@ const Entry = struct {
 allocator: std.mem.Allocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
+relative: bool,
 
-pub fn init(allocator: std.mem.Allocator) Tags {
+pub fn init(allocator: std.mem.Allocator, relative: bool) Tags {
     return Tags{
         .allocator = allocator,
         .entries = .{},
         .visited = std.StringHashMap(void).init(allocator),
+        .relative = relative,
     };
 }
 
@@ -223,6 +225,12 @@ pub fn write(self: *Tags, output: []const u8) !void {
         }
     }.lessThan);
 
+    const cwd = if (self.relative)
+        try std.fs.realpathAlloc(self.allocator, ".")
+    else
+        null;
+    defer if (cwd) |c| self.allocator.free(c);
+
     for (self.entries.items) |entry| {
         const text = if (std.mem.indexOfScalar(u8, entry.text, '/')) |_| a: {
             var text = try std.ArrayList(u8).initCapacity(self.allocator, entry.text.len);
@@ -238,9 +246,15 @@ pub fn write(self: *Tags, output: []const u8) !void {
         } else entry.text;
         defer if (text.ptr != entry.text.ptr) self.allocator.free(text);
 
+        const filename = if (cwd) |c|
+            try std.fs.path.relative(self.allocator, c, entry.filename)
+        else
+            entry.filename;
+        defer if (filename.ptr != entry.filename.ptr) self.allocator.free(filename);
+
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
             entry.ident,
-            entry.filename,
+            filename,
             text,
             @tagName(entry.kind),
         });
