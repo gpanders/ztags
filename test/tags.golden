@@ -1,0 +1,16 @@
+!_TAG_FILE_SORTED	1	/1 = sorted/
+!_TAG_FILE_ENCODING	utf-8	
+MyEnum	test/a.zig	/^const MyEnum = enum {$/;"	enum
+MyStruct	test/a.zig	/^const MyStruct = struct {$/;"	struct
+MyUnion	test/a.zig	/^const MyUnion = union(enum) {$/;"	union
+a	test/a.zig	/a/;"	field
+anotherFunction	test/b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
+b	test/a.zig	/b/;"	field
+c	test/a.zig	/c: u8/;"	field
+d	test/a.zig	/d: u8/;"	field
+e	test/a.zig	/e: void/;"	field
+f	test/a.zig	/f: u32/;"	field
+myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
+x	test/a.zig	/const x = switch (e) {$/;"	constant
+y	test/b.zig	/var y = x + 1/;"	variable
+y	test/a.zig	/const y = switch (u) {$/;"	constant

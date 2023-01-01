@@ -1,5 +1,41 @@
 const std = @import("std");
 
+const DiffStep = struct {
+    step: std.build.Step,
+    builder: *std.build.Builder,
+    a: std.build.FileSource,
+    b: std.build.FileSource,
+
+    fn init(
+        builder: *std.build.Builder,
+        a: std.build.FileSource,
+        b: std.build.FileSource,
+    ) *DiffStep {
+        const self = builder.allocator.create(DiffStep) catch unreachable;
+        self.* = .{
+            .builder = builder,
+            .a = a.dupe(builder),
+            .b = b.dupe(builder),
+            .step = std.build.Step.init(.custom, "Diff", builder.allocator, make),
+        };
+
+        return self;
+    }
+
+    fn make(step: *std.build.Step) !void {
+        const self = @fieldParentPtr(DiffStep, "step", step);
+        const a_path = self.a.getPath(self.builder);
+        const b_path = self.b.getPath(self.builder);
+        const a = try std.fs.cwd().readFileAlloc(self.builder.allocator, a_path, 20 * 1024 * 1024);
+        const b = try std.fs.cwd().readFileAlloc(self.builder.allocator, b_path, 20 * 1024 * 1024);
+
+        if (std.mem.indexOfDiff(u8, a, b)) |index| {
+            std.debug.print("{s} and {s} differ at byte {}\n", .{ a_path, b_path, index });
+            return error.FilesDiffer;
+        }
+    }
+};
+
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
@@ -22,6 +58,21 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
 
+    const test_run_cmd = exe.run();
+    test_run_cmd.addArgs(&.{ "-o", "test/tags", "-r" });
+    test_run_cmd.addFileSourceArg(std.build.FileSource.relative("test/a.zig"));
+
+    const diff_step = DiffStep.init(
+        b,
+        std.build.FileSource.relative("test/tags"),
+        std.build.FileSource.relative("test/tags.golden"),
+    );
+    diff_step.step.dependOn(&test_run_cmd.step);
+
+    const remove_step = b.addRemoveDirTree("test/tags");
+    remove_step.step.dependOn(&diff_step.step);
+
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
+    test_step.dependOn(&remove_step.step);
 }
