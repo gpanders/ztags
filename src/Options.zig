@@ -29,7 +29,13 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
 
     var next_option: ?OptionField = null;
     while (iter.next()) |arg| {
-        if (std.mem.startsWith(u8, arg, "-")) {
+        if (next_option) |opt| {
+            switch (opt) {
+                .output => options.output = try allocator.dupe(u8, arg),
+                else => unreachable,
+            }
+            next_option = null;
+        } else if (std.mem.startsWith(u8, arg, "-")) {
             if (arg.len < 2) {
                 rc.* = 1;
                 return error.InvalidOption;
@@ -39,12 +45,6 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
                 rc.* = if (std.mem.eql(u8, arg[1..], "h")) 0 else 1;
                 return error.InvalidOption;
             }
-        } else if (next_option) |opt| {
-            switch (opt) {
-                .output => options.output = try allocator.dupe(u8, arg),
-                else => unreachable,
-            }
-            next_option = null;
         } else {
             const a = try allocator.dupe(u8, arg);
             errdefer allocator.free(a);
