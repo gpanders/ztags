@@ -16,6 +16,7 @@ const options_map = std.ComptimeStringMap(OptionField, .{
 pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
     var it = try std.process.argsWithAllocator(allocator);
     defer it.deinit();
+    _ = it.skip();
     return try parseIter(allocator, &it, rc);
 }
 
