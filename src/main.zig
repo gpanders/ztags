@@ -31,7 +31,7 @@ pub fn main() anyerror!u8 {
     };
     defer options.deinit(allocator);
 
-    var tags = Tags.init(allocator, options.relative);
+    var tags = Tags.init(allocator);
     defer tags.deinit();
 
     for (options.arguments) |fname| {
@@ -53,7 +53,7 @@ pub fn main() anyerror!u8 {
         };
     }
 
-    try tags.write(options.output);
+    try tags.write(options.output, options.relative);
 
     return 0;
 }

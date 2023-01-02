@@ -30,14 +30,12 @@ const Entry = struct {
 allocator: std.mem.Allocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
-relative: bool,
 
-pub fn init(allocator: std.mem.Allocator, relative: bool) Tags {
+pub fn init(allocator: std.mem.Allocator) Tags {
     return Tags{
         .allocator = allocator,
         .entries = .{},
         .visited = std.StringHashMap(void).init(allocator),
-        .relative = relative,
     };
 }
 
@@ -207,7 +205,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     }
 }
 
-pub fn write(self: *Tags, output: []const u8) !void {
+pub fn write(self: *Tags, output: []const u8, relative: bool) !void {
     var contents = std.ArrayList(u8).init(self.allocator);
     defer contents.deinit();
 
@@ -225,7 +223,7 @@ pub fn write(self: *Tags, output: []const u8) !void {
         }
     }.lessThan);
 
-    const cwd = if (self.relative)
+    const cwd = if (relative)
         try std.fs.realpathAlloc(self.allocator, ".")
     else
         null;
