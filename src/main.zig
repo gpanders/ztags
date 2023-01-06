@@ -36,10 +36,9 @@ pub fn main() anyerror!u8 {
 
     for (options.arguments) |fname| {
         const full_fname = if (std.fs.path.isAbsolute(fname))
-            fname
+            try allocator.dupe(u8, fname)
         else
             try std.fs.cwd().realpathAlloc(allocator, fname);
-        defer if (fname.ptr != full_fname.ptr) allocator.free(full_fname);
 
         tags.findTags(full_fname) catch |err| switch (err) {
             error.NotFile => {
