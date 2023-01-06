@@ -209,7 +209,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     }
 }
 
-pub fn write(self: *Tags, output: []const u8, relative: bool) !void {
+pub fn write(self: *Tags, output: anytype, relative: bool) !void {
     var contents = std.ArrayList(u8).init(self.allocator);
     defer contents.deinit();
 
@@ -275,14 +275,7 @@ pub fn write(self: *Tags, output: []const u8, relative: bool) !void {
         });
     }
 
-    if (std.mem.eql(u8, output, "-")) {
-        return try std.io.getStdOut().writeAll(contents.items);
-    }
-
-    var file = try std.fs.cwd().createFile(output, .{});
-    defer file.close();
-
-    try file.writeAll(contents.items);
+    try output.writeAll(contents.items);
 }
 
 fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ![]const u8 {
@@ -298,4 +291,91 @@ fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.As
     else
         "";
     return try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
+}
+
+test "findTags" {
+    var test_dir = try std.fs.cwd().makeOpenPath("test", .{});
+    defer std.fs.cwd().deleteTree("test") catch unreachable;
+
+    const a_src =
+        \\const b = @import("b.zig");
+        \\
+        \\const MyEnum = enum {
+        \\    a,
+        \\    b,
+        \\};
+        \\
+        \\const MyStruct = struct {
+        \\    c: u8,
+        \\    d: u8,
+        \\};
+        \\
+        \\const MyUnion = union(enum) {
+        \\    e: void,
+        \\    f: u32,
+        \\};
+        \\
+        \\fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {
+        \\    const x = switch (e) {
+        \\        .a => s.d,
+        \\        .b => s.c,
+        \\    };
+        \\
+        \\    const y = switch (u) {
+        \\        .e => null,
+        \\        .f => |f| f,
+        \\    };
+        \\
+        \\    if (x > y) {
+        \\        return x;
+        \\    }
+        \\
+        \\    return b.anotherFunction(y);
+        \\}
+        \\
+    ;
+
+    const b_src =
+        \\fn anotherFunction(x: u8) u8 {
+        \\    var y = x + 1;
+        \\    return y * 2;
+        \\}
+        \\
+    ;
+
+    try test_dir.writeFile("a.zig", a_src);
+    try test_dir.writeFile("b.zig", b_src);
+
+    var tags = Tags.init(std.testing.allocator);
+    defer tags.deinit();
+
+    const full_path = try test_dir.realpathAlloc(std.testing.allocator, "a.zig");
+    try tags.findTags(full_path);
+
+    var actual = std.ArrayList(u8).init(std.testing.allocator);
+    defer actual.deinit();
+
+    try tags.write(actual.writer(), true);
+
+    const golden =
+        \\!_TAG_FILE_SORTED	1	/1 = sorted/
+        \\!_TAG_FILE_ENCODING	utf-8	
+        \\MyEnum	test/a.zig	/^const MyEnum = enum {$/;"	enum
+        \\MyStruct	test/a.zig	/^const MyStruct = struct {$/;"	struct
+        \\MyUnion	test/a.zig	/^const MyUnion = union(enum) {$/;"	union
+        \\a	test/a.zig	/a/;"	field
+        \\anotherFunction	test/b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
+        \\b	test/a.zig	/b/;"	field
+        \\c	test/a.zig	/c: u8/;"	field
+        \\d	test/a.zig	/d: u8/;"	field
+        \\e	test/a.zig	/e: void/;"	field
+        \\f	test/a.zig	/f: u32/;"	field
+        \\myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
+        \\x	test/a.zig	/const x = switch (e) {$/;"	constant
+        \\y	test/b.zig	/var y = x + 1/;"	variable
+        \\y	test/a.zig	/const y = switch (u) {$/;"	constant
+        \\
+    ;
+
+    try std.testing.expectEqualStrings(golden, actual.items);
 }

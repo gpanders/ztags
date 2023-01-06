@@ -58,21 +58,6 @@ pub fn build(b: *std.build.Builder) void {
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
 
-    const test_run_cmd = exe.run();
-    test_run_cmd.addArgs(&.{ "-o", "test/tags", "-r" });
-    test_run_cmd.addFileSourceArg(std.build.FileSource.relative("test/a.zig"));
-
-    const diff_step = DiffStep.init(
-        b,
-        std.build.FileSource.relative("test/tags"),
-        std.build.FileSource.relative("test/tags.golden"),
-    );
-    diff_step.step.dependOn(&test_run_cmd.step);
-
-    const remove_step = b.addRemoveDirTree("test/tags");
-    remove_step.step.dependOn(&diff_step.step);
-
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
-    test_step.dependOn(&remove_step.step);
 }

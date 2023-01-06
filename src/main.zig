@@ -52,7 +52,18 @@ pub fn main() anyerror!u8 {
         };
     }
 
-    try tags.write(options.output, options.relative);
+    var file = if (std.mem.eql(u8, options.output, "-"))
+        null
+    else
+        try std.fs.cwd().openFile(options.output, .{});
+    defer if (file) |f| f.close();
+
+    var output = if (file) |f|
+        f.writer()
+    else
+        std.io.getStdOut().writer();
+
+    try tags.write(output, options.relative);
 
     return 0;
 }
