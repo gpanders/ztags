@@ -55,7 +55,7 @@ pub fn main() anyerror!u8 {
     var file = if (std.mem.eql(u8, options.output, "-"))
         null
     else
-        try std.fs.cwd().openFile(options.output, .{});
+        try std.fs.cwd().openFile(options.output, .{ .mode = .write_only });
     defer if (file) |f| f.close();
 
     var output = if (file) |f|
