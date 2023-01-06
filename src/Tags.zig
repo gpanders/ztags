@@ -22,8 +22,8 @@ const Entry = struct {
 
     fn deinit(self: Entry, allocator: std.mem.Allocator) void {
         allocator.free(self.ident);
-        allocator.free(self.filename);
         allocator.free(self.text);
+        // Do not free self.filename, it is borrowed (owned by Tags.visited)
     }
 };
 
@@ -45,6 +45,11 @@ pub fn deinit(self: *Tags) void {
     }
 
     self.entries.deinit(self.allocator);
+
+    var it = self.visited.keyIterator();
+    while (it.next()) |key| {
+        self.allocator.free(key.*);
+    }
     self.visited.deinit();
 }
 
@@ -79,6 +84,8 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     var ast = try std.zig.parse(allocator, source);
     defer ast.deinit(allocator);
 
+    var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
     const data = ast.nodes.items(.data);
@@ -94,15 +101,12 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                     const name = std.mem.trim(u8, ast.tokenSlice(name_index), "\"");
                     if (std.mem.endsWith(u8, name, ".zig")) {
                         const dir = std.fs.path.dirname(fname) orelse continue;
-                        const import_fname = try std.fmt.allocPrint(allocator, "{s}/{s}", .{
+                        const import_fname = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{
                             dir,
                             name,
                         });
-                        defer allocator.free(import_fname);
 
                         const resolved = try std.fs.path.resolve(allocator, &.{import_fname});
-                        defer allocator.free(resolved);
-
                         self.findTags(resolved) catch |err| switch (err) {
                             error.FileNotFound => continue,
                             else => return err,
@@ -198,7 +202,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 
         try self.entries.append(allocator, .{
             .ident = try allocator.dupe(u8, ident.?),
-            .filename = try allocator.dupe(u8, fname),
+            .filename = fname,
             .kind = kind.?,
             .text = try getNodeText(allocator, ast, @intCast(u32, i)),
         });
