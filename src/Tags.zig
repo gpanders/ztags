@@ -217,7 +217,7 @@ pub fn write(self: *Tags, output: anytype, relative: bool) !void {
 
     try writer.writeAll(
         \\!_TAG_FILE_SORTED	1	/1 = sorted/
-        \\!_TAG_FILE_ENCODING	utf-8	
+        \\!_TAG_FILE_ENCODING	utf-8
         \\
     );
 
@@ -359,7 +359,7 @@ test "findTags" {
 
     const golden =
         \\!_TAG_FILE_SORTED	1	/1 = sorted/
-        \\!_TAG_FILE_ENCODING	utf-8	
+        \\!_TAG_FILE_ENCODING	utf-8
         \\MyEnum	test/a.zig	/^const MyEnum = enum {$/;"	enum
         \\MyStruct	test/a.zig	/^const MyStruct = struct {$/;"	struct
         \\MyUnion	test/a.zig	/^const MyUnion = union(enum) {$/;"	union
