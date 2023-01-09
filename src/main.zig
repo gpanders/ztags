@@ -52,18 +52,26 @@ pub fn main() anyerror!u8 {
         };
     }
 
-    var file = if (std.mem.eql(u8, options.output, "-"))
-        null
-    else
-        try std.fs.cwd().openFile(options.output, .{ .mode = .write_only });
-    defer if (file) |f| f.close();
+    if (std.mem.eql(u8, options.output, "-")) {
+        const content = try tags.write(options.relative);
+        defer allocator.free(content);
+        try std.io.getStdOut().writeAll(content);
+    } else {
+        var file = try std.fs.cwd().createFile(options.output, .{ .read = true, .truncate = false });
+        defer file.close();
 
-    var output = if (file) |f|
-        f.writer()
-    else
-        std.io.getStdOut().writer();
+        if (options.append) {
+            const contents = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
+            defer allocator.free(contents);
 
-    try tags.write(output, options.relative);
+            try tags.read(contents);
+        }
+
+        const content = try tags.write(options.relative);
+        defer allocator.free(content);
+
+        try std.fs.cwd().writeFile(options.output, content);
+    }
 
     return 0;
 }
