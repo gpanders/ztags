@@ -42,6 +42,23 @@ The following "kinds" are supported:
 - `variable`
 - `union`
 
+## Contributing
+
+Have a question, comment, or feature request? Send an email to the [mailing
+list][list].
+
+Report bugs on the [ticket tracker][tickets]. You can file a ticket without a
+sourcehut account by sending a [plain text email](useplaintext.email) to
+[~gpanders/ztags@todo.sr.ht](mailto://~gpanders/ztags@todo.sr.ht).
+
+Send patches to [~gpanders/ztags@lists.sr.ht][list] or open a pull request on
+[GitHub][github].
+
+[list]: https://lists.sr.ht/~gpanders/ztags
+[github]: https://github.com/gpanders/ztags
+[tickets]: https://todo.sr.ht/~gpanders/ztags
+
+
 ## License
 
 MIT
