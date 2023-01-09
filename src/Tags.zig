@@ -553,8 +553,8 @@ test "Tags.findTags" {
         \\f	test/a.zig	/f: u32/;"	field
         \\myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
         \\x	test/a.zig	/const x = switch (e) {$/;"	constant
-        \\y	test/b.zig	/var y = x + 1/;"	variable
         \\y	test/a.zig	/const y = switch (u) {$/;"	constant
+        \\y	test/b.zig	/var y = x + 1/;"	variable
         \\
     ;
 
@@ -577,8 +577,8 @@ test "Tags.read" {
         \\f	test/a.zig	/f: u32/;"	field
         \\myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
         \\x	test/a.zig	/const x = switch (e) {$/;"	constant
-        \\y	test/b.zig	/var y = x + 1/;"	variable
         \\y	test/a.zig	/const y = switch (u) {$/;"	constant
+        \\y	test/b.zig	/var y = x + 1/;"	variable
         \\
     ;
 
