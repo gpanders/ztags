@@ -4,10 +4,6 @@ const std = @import("std");
 const Options = @import("Options.zig");
 const Tags = @import("Tags.zig");
 
-fn usage() void {
-    std.debug.print("Usage: {s} [-o OUTPUT] [-a] [-r] FILES...\n", .{std.os.argv[0]});
-}
-
 pub fn main() anyerror!u8 {
     var base_allocator = switch (builtin.mode) {
         .Debug => std.heap.GeneralPurposeAllocator(.{}){},
@@ -20,12 +16,7 @@ pub fn main() anyerror!u8 {
     var options = a: {
         var rc: u8 = 0;
         break :a Options.parse(allocator, &rc) catch |err| switch (err) {
-            error.InvalidOption,
-            error.MissingArguments,
-            => {
-                usage();
-                return rc;
-            },
+            error.InvalidOption, error.MissingArguments => return rc,
             else => return err,
         };
     };
