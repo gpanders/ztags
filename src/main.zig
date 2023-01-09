@@ -5,7 +5,7 @@ const Options = @import("Options.zig");
 const Tags = @import("Tags.zig");
 
 fn usage() void {
-    std.debug.print("Usage: {s} [-o OUTPUT] [-r] FILES...\n", .{std.os.argv[0]});
+    std.debug.print("Usage: {s} [-o OUTPUT] [-a] [-r] FILES...\n", .{std.os.argv[0]});
 }
 
 pub fn main() anyerror!u8 {
