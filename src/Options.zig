@@ -4,6 +4,7 @@ const Options = @This();
 
 output: []const u8 = "",
 relative: bool = false,
+append: bool = false,
 arguments: []const []const u8 = undefined,
 
 const OptionField = std.meta.FieldEnum(Options);
@@ -11,6 +12,7 @@ const OptionField = std.meta.FieldEnum(Options);
 const options_map = std.ComptimeStringMap(OptionField, .{
     .{ "o", .output },
     .{ "r", .relative },
+    .{ "a", .append },
 });
 
 pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
@@ -46,6 +48,7 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
                 switch (opt) {
                     .output => next_option = opt,
                     .relative => options.relative = true,
+                    .append => options.append = true,
                     else => unreachable,
                 }
             } else {
@@ -122,6 +125,7 @@ test "parseIter" {
         try std.testing.expectEqual(@as(u8, 0), rc);
         try std.testing.expectEqualStrings("tags", options.output);
         try std.testing.expectEqual(false, options.relative);
+        try std.testing.expectEqual(false, options.append);
         try std.testing.expectEqual(@as(usize, 2), options.arguments.len);
         try std.testing.expectEqualStrings("hello.zig", options.arguments[0]);
         try std.testing.expectEqualStrings("world.zig", options.arguments[1]);
@@ -139,6 +143,7 @@ test "parseIter" {
         try std.testing.expectEqual(@as(u8, 0), rc);
         try std.testing.expectEqualStrings("foo", options.output);
         try std.testing.expectEqual(true, options.relative);
+        try std.testing.expectEqual(false, options.append);
     }
 
     {

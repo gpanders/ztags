@@ -12,6 +12,38 @@ const Kind = enum {
     @"union",
     variable,
     constant,
+    unknown,
+
+    fn parse(text: []const u8) ?Kind {
+        return if (std.mem.eql(u8, text, "function"))
+            .function
+        else if (std.mem.eql(u8, text, "field"))
+            .field
+        else if (std.mem.eql(u8, text, "struct"))
+            .@"struct"
+        else if (std.mem.eql(u8, text, "enum"))
+            .@"enum"
+        else if (std.mem.eql(u8, text, "union"))
+            .@"union"
+        else if (std.mem.eql(u8, text, "variable"))
+            .variable
+        else if (std.mem.eql(u8, text, "constant"))
+            .constant
+        else if (std.mem.eql(u8, text, "unknown"))
+            .unknown
+        else
+            null;
+    }
+
+    test "Kind.parse" {
+        inline for (@typeInfo(Kind).Enum.fields) |field| {
+            const parsed = Kind.parse(field.name) orelse {
+                std.debug.print("Kind variant \"{s}\" missing in Kind.parse()\n", .{field.name});
+                return error.MissingParseVariant;
+            };
+            try std.testing.expectEqual(parsed, @intToEnum(Kind, field.value));
+        }
+    }
 };
 
 const Entry = struct {
@@ -23,7 +55,13 @@ const Entry = struct {
     fn deinit(self: Entry, allocator: std.mem.Allocator) void {
         allocator.free(self.ident);
         allocator.free(self.text);
-        // Do not free self.filename, it is borrowed (owned by Tags.visited)
+    }
+
+    fn eql(self: Entry, other: Entry) bool {
+        return std.mem.eql(u8, self.ident, other.ident) and
+            std.mem.eql(u8, self.filename, other.filename) and
+            std.mem.eql(u8, self.text, other.text) and
+            self.kind == other.kind;
     }
 };
 
@@ -209,7 +247,69 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     }
 }
 
-pub fn write(self: *Tags, output: anytype, relative: bool) !void {
+/// Read tags entries from a tags file
+pub fn read(self: *Tags, data: []const u8) !void {
+    var lines = std.mem.tokenize(u8, data, "\n");
+    while (lines.next()) |line| {
+        if (line.len == 0 or line[0] == '!') {
+            continue;
+        }
+
+        var ident: ?[]const u8 = null;
+        var filename: ?[]const u8 = null;
+        var text: ?[]const u8 = null;
+        var kind: ?Kind = null;
+
+        var i: usize = 0;
+        var fields = std.mem.tokenize(u8, line, "\t");
+        while (fields.next()) |field| : (i += 1) {
+            switch (i) {
+                0 => ident = field,
+                1 => filename = field,
+                2 => text = text: {
+                    var slice = field;
+                    if (slice.len > 0 and slice[0] == '/') {
+                        slice = slice[1..];
+                    }
+
+                    if (std.mem.lastIndexOf(u8, slice, "/;\"")) |j| {
+                        slice = slice[0..j];
+                    }
+
+                    break :text slice;
+                },
+                3 => kind = Kind.parse(field) orelse .unknown,
+                else => break,
+            }
+        }
+
+        if (ident == null or filename == null or text == null or kind == null) {
+            continue;
+        }
+
+        ident = try self.allocator.dupe(u8, ident.?);
+        errdefer self.allocator.free(ident.?);
+
+        const gop = try self.visited.getOrPut(filename.?);
+        if (!gop.found_existing) {
+            gop.key_ptr.* = try self.allocator.dupe(u8, filename.?);
+            gop.value_ptr.* = {};
+        }
+        filename.? = gop.key_ptr.*;
+
+        text = try std.mem.replaceOwned(u8, self.allocator, text.?, "\\/", "/");
+        errdefer self.allocator.free(text.?);
+
+        try self.entries.append(self.allocator, .{
+            .ident = ident.?,
+            .filename = filename.?,
+            .text = text.?,
+            .kind = kind.?,
+        });
+    }
+}
+
+pub fn write(self: *Tags, relative: bool) ![]const u8 {
     var contents = std.ArrayList(u8).init(self.allocator);
     defer contents.deinit();
 
@@ -221,11 +321,7 @@ pub fn write(self: *Tags, output: anytype, relative: bool) !void {
         \\
     );
 
-    std.sort.sort(Entry, self.entries.items, {}, struct {
-        fn lessThan(_: void, a: Entry, b: Entry) bool {
-            return std.mem.lessThan(u8, a.ident, b.ident);
-        }
-    }.lessThan);
+    self.entries = try removeDuplicates(self.allocator, &self.entries);
 
     const cwd = if (relative)
         try std.fs.realpathAlloc(self.allocator, ".")
@@ -275,7 +371,94 @@ pub fn write(self: *Tags, output: anytype, relative: bool) !void {
         });
     }
 
-    try output.writeAll(contents.items);
+    return contents.toOwnedSlice();
+}
+
+fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !EntryList {
+    std.sort.sort(Entry, orig.items, {}, struct {
+        fn lessThan(_: void, a: Entry, b: Entry) bool {
+            return switch (std.mem.order(u8, a.ident, b.ident)) {
+                .lt => true,
+                .gt => false,
+                .eq => switch (std.mem.order(u8, a.filename, b.filename)) {
+                    .lt => true,
+                    .gt => false,
+                    .eq => std.mem.lessThan(u8, a.text, b.text),
+                },
+            };
+        }
+    }.lessThan);
+    defer orig.deinit(allocator);
+
+    var deduplicated_entries = EntryList{};
+
+    var last_unique: usize = 0;
+    for (orig.items) |entry, i| {
+        if (i == 0 or !orig.items[last_unique].eql(entry)) {
+            try deduplicated_entries.append(allocator, entry);
+            last_unique = i;
+        } else {
+            entry.deinit(allocator);
+        }
+    }
+
+    return deduplicated_entries;
+}
+
+test "removeDuplicates" {
+    var allocator = std.testing.allocator;
+    const input = [_]Entry{
+        .{
+            .ident = try allocator.dupe(u8, "foo"),
+            .filename = "foo.zig",
+            .text = try allocator.dupe(u8, "hi this is foo"),
+            .kind = .variable,
+        },
+        .{
+            .ident = try allocator.dupe(u8, "foo"),
+            .filename = "foo.zig",
+            .text = try allocator.dupe(u8, "hi this is foo"),
+            .kind = .variable,
+        },
+        .{
+            .ident = try allocator.dupe(u8, "bar"),
+            .filename = "foo.zig",
+            .text = try allocator.dupe(u8, "hi this is bar"),
+            .kind = .variable,
+        },
+        .{
+            .ident = try allocator.dupe(u8, "baz"),
+            .filename = "baz.zig",
+            .text = try allocator.dupe(u8, "hi this is baz"),
+            .kind = .function,
+        },
+        .{
+            .ident = try allocator.dupe(u8, "foo"),
+            .filename = "foo.zig",
+            .text = try allocator.dupe(u8, "hi this is foo"),
+            .kind = .variable,
+        },
+        .{
+            .ident = try allocator.dupe(u8, "bar"),
+            .filename = "foo.zig",
+            .text = try allocator.dupe(u8, "hi this is bar"),
+            .kind = .variable,
+        },
+    };
+
+    var orig = EntryList{};
+    try orig.appendSlice(allocator, &input);
+
+    var deduplicated = try removeDuplicates(allocator, &orig);
+    defer {
+        for (deduplicated.items) |entry| entry.deinit(allocator);
+        deduplicated.deinit(allocator);
+    }
+
+    try std.testing.expectEqual(@as(usize, 3), deduplicated.items.len);
+    try std.testing.expectEqual(input[2], deduplicated.items[0]);
+    try std.testing.expectEqual(input[3], deduplicated.items[1]);
+    try std.testing.expectEqual(input[0], deduplicated.items[2]);
 }
 
 fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ![]const u8 {
@@ -293,7 +476,7 @@ fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.As
     return try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
 }
 
-test "findTags" {
+test "Tags.findTags" {
     var test_dir = try std.fs.cwd().makeOpenPath("test", .{});
     defer std.fs.cwd().deleteTree("test") catch unreachable;
 
@@ -352,10 +535,8 @@ test "findTags" {
     const full_path = try test_dir.realpathAlloc(std.testing.allocator, "a.zig");
     try tags.findTags(full_path);
 
-    var actual = std.ArrayList(u8).init(std.testing.allocator);
-    defer actual.deinit();
-
-    try tags.write(actual.writer(), true);
+    const actual = try tags.write(true);
+    defer std.testing.allocator.free(actual);
 
     const golden =
         \\!_TAG_FILE_SORTED	1	/1 = sorted/
@@ -377,5 +558,36 @@ test "findTags" {
         \\
     ;
 
-    try std.testing.expectEqualStrings(golden, actual.items);
+    try std.testing.expectEqualStrings(golden, actual);
+}
+
+test "Tags.read" {
+    const input =
+        \\!_TAG_FILE_SORTED	1	/1 = sorted/
+        \\!_TAG_FILE_ENCODING	utf-8
+        \\MyEnum	test/a.zig	/^const MyEnum = enum {$/;"	enum
+        \\MyStruct	test/a.zig	/^const MyStruct = struct {$/;"	struct
+        \\MyUnion	test/a.zig	/^const MyUnion = union(enum) {$/;"	union
+        \\a	test/a.zig	/a/;"	field
+        \\anotherFunction	test/b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
+        \\b	test/a.zig	/b/;"	field
+        \\c	test/a.zig	/c: u8/;"	field
+        \\d	test/a.zig	/d: u8/;"	field
+        \\e	test/a.zig	/e: void/;"	field
+        \\f	test/a.zig	/f: u32/;"	field
+        \\myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
+        \\x	test/a.zig	/const x = switch (e) {$/;"	constant
+        \\y	test/b.zig	/var y = x + 1/;"	variable
+        \\y	test/a.zig	/const y = switch (u) {$/;"	constant
+        \\
+    ;
+
+    var tags = Tags.init(std.testing.allocator);
+    defer tags.deinit();
+
+    try tags.read(input);
+    const output = try tags.write(true);
+    defer std.testing.allocator.free(output);
+
+    try std.testing.expectEqualStrings(input, output);
 }
