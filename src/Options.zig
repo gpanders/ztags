@@ -15,11 +15,24 @@ const options_map = std.ComptimeStringMap(OptionField, .{
     .{ "a", .append },
 });
 
+fn usage(exe: []const u8) void {
+    std.debug.print("Usage: {s} [-o OUTPUT] [-a] [-r] FILES...\n", .{exe});
+}
+
 pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
     var it = try std.process.argsWithAllocator(allocator);
     defer it.deinit();
-    _ = it.skip();
-    return try parseIter(allocator, &it, rc);
+
+    const exe = it.next();
+
+    return parseIter(allocator, &it, rc) catch |err| {
+        switch (err) {
+            error.InvalidOption, error.MissingArguments => usage(exe orelse "ztags"),
+            else => {},
+        }
+
+        return err;
+    };
 }
 
 fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
