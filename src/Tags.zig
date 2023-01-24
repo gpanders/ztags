@@ -292,7 +292,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
             gop.key_ptr.* = try self.allocator.dupe(u8, filename.?);
             gop.value_ptr.* = {};
         }
-        filename.? = gop.key_ptr.*;
+        filename = gop.key_ptr.*;
 
         text = try std.mem.replaceOwned(u8, self.allocator, text.?, "\\/", "/");
         errdefer self.allocator.free(text.?);
@@ -337,27 +337,16 @@ pub fn write(self: *Tags, relative: bool) ![]const u8 {
     }
 
     for (self.entries.items) |entry| {
-        const text = if (std.mem.indexOfScalar(u8, entry.text, '/')) |_| a: {
-            var text = try std.ArrayList(u8).initCapacity(self.allocator, entry.text.len);
-            for (entry.text) |c| {
-                if (c == '/') {
-                    try text.append('\\');
-                }
-
-                try text.append(c);
-            }
-
-            break :a try text.toOwnedSlice();
-        } else entry.text;
+        const text = try escape(self.allocator, entry.text);
         defer if (text.ptr != entry.text.ptr) self.allocator.free(text);
 
-        const filename = if (cwd) |c| a: {
+        const filename = if (cwd) |c| filename: {
             const gop = try relative_paths.getOrPut(entry.filename);
             if (!gop.found_existing) {
                 gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, entry.filename);
             }
 
-            break :a gop.value_ptr.*;
+            break :filename gop.value_ptr.*;
         } else entry.filename;
 
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
@@ -368,7 +357,7 @@ pub fn write(self: *Tags, relative: bool) ![]const u8 {
         });
     }
 
-    return contents.toOwnedSlice();
+    return try contents.toOwnedSlice();
 }
 
 fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !EntryList {
@@ -471,6 +460,55 @@ fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.As
     else
         "";
     return try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
+}
+
+fn escape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+    const escape_chars = "\\/";
+    const escaped_length = blk: {
+        var count: usize = 0;
+        var start: usize = 0;
+        while (std.mem.indexOfAnyPos(u8, text, start, escape_chars)) |i| {
+            count += 1;
+            start = i + 1;
+        }
+
+        break :blk text.len + count;
+    };
+
+    if (text.len == escaped_length) {
+        return text;
+    }
+
+    var output = try std.ArrayList(u8).initCapacity(allocator, escaped_length);
+    defer output.deinit();
+
+    for (text) |c| {
+        if (std.mem.indexOfScalar(u8, escape_chars, c)) |_| {
+            output.appendAssumeCapacity('\\');
+        }
+
+        output.appendAssumeCapacity(c);
+    }
+
+    return try output.toOwnedSlice();
+}
+
+test "escape" {
+    var allocator = std.testing.allocator;
+
+    {
+        const unescaped = "and/or\\/";
+        const escaped = try escape(allocator, unescaped);
+        defer allocator.free(escaped);
+
+        try std.testing.expectEqualStrings("and\\/or\\\\\\/", escaped);
+    }
+
+    {
+        const unescaped = "hello world";
+        const escaped = try escape(allocator, unescaped);
+        try std.testing.expectEqualStrings(unescaped, escaped);
+    }
 }
 
 test "Tags.findTags" {
