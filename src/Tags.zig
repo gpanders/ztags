@@ -12,7 +12,6 @@ const Kind = enum {
     @"union",
     variable,
     constant,
-    unknown,
 
     fn parse(text: []const u8) ?Kind {
         return if (std.mem.eql(u8, text, "function"))
@@ -29,8 +28,6 @@ const Kind = enum {
             .variable
         else if (std.mem.eql(u8, text, "constant"))
             .constant
-        else if (std.mem.eql(u8, text, "unknown"))
-            .unknown
         else
             null;
     }
@@ -278,7 +275,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
 
                     break :text slice;
                 },
-                3 => kind = Kind.parse(field) orelse .unknown,
+                3 => kind = Kind.parse(field),
                 else => break,
             }
         }
