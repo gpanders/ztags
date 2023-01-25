@@ -1,5 +1,9 @@
 const std = @import("std");
 
+const windowsApi = @import("windows.zig");
+
+const OS_TAG = @import("builtin").os.tag;
+
 const Tags = @This();
 
 const EntryList = std.ArrayListUnmanaged(Entry);
@@ -96,24 +100,101 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     gop.value_ptr.* = {};
 
     const mapped = a: {
-        var file = try std.fs.cwd().openFile(fname, .{});
-        defer file.close();
+        if (OS_TAG == .windows) {
+            const w = std.os.windows;
 
-        const metadata = try file.metadata();
-        const size = metadata.size();
-        if (size == 0) {
-            return;
+            const stupid_alloc_fname = try self.allocator.dupeZ(u8, fname);
+            defer self.allocator.free(stupid_alloc_fname);
+
+            const dwAttrib = windowsApi.GetFileAttributesA(stupid_alloc_fname);
+
+            if ((dwAttrib & w.FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                return error.NotFile;
+            }
+
+            const hfile = windowsApi.CreateFileA(stupid_alloc_fname, w.GENERIC_READ, // dwDesiredAccess
+                0, // dwShareMode
+                null, // lpSecurityAttributes
+                w.OPEN_EXISTING, // dwCreationDisposition
+                w.FILE_ATTRIBUTE_NORMAL, null // hTemplateFile
+            );
+
+            if (hfile == w.INVALID_HANDLE_VALUE) {
+                // TODO(smolck): Handle this error?
+                // fprintf(stderr, "CreateFile failed with error %d\n", GetLastError());
+                // return 1;
+            }
+
+            const li_fsize = try w.GetFileSizeEx(hfile);
+
+            if (li_fsize == 0) {
+                w.CloseHandle(hfile);
+                return;
+            }
+
+            const name: [*:0]const u8 = ""; // TODO(smolck): I'd like to just pass null but idk
+            const hmap = windowsApi.CreateFileMappingA(hfile, null, // Mapping attributes
+                w.PAGE_READONLY, // Protection flags
+                0, // MaximumSizeHigh
+                0, // MaximumSizeLow
+                name); // Name
+
+            if (hmap == windowsApi.NULL) {
+                std.debug.print("failed with an error mapping handle this lol", .{});
+            }
+
+            const lp_baseptr = windowsApi.MapViewOfFile(hmap, windowsApi.FILE_MAP_READ, // dwDesiredAccess
+                0, // dwFileOffsetHigh
+                0, // dwFileOffsetLow
+                0); // dwNumberOfBytesToMap
+
+            if (lp_baseptr == null) {
+                w.CloseHandle(hmap);
+                w.CloseHandle(hfile);
+
+                // TODO(smolck): Not sure what error to return here or whatever
+                return;
+            }
+
+            break :a .{ .size = li_fsize, .ptr = lp_baseptr, .hmap = hmap, .hfile = hfile };
+        } else {
+            var file = try std.fs.cwd().openFile(fname, .{});
+            defer file.close();
+
+            const metadata = try file.metadata();
+            const size = metadata.size();
+            if (size == 0) {
+                return;
+            }
+
+            if (metadata.kind() == .Directory) {
+                return error.NotFile;
+            }
+
+            break :a try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
         }
-
-        if (metadata.kind() == .Directory) {
-            return error.NotFile;
-        }
-
-        break :a try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
     };
-    defer std.os.munmap(mapped);
 
-    const source = std.meta.assumeSentinel(mapped, 0);
+    defer {
+        if (OS_TAG == .windows) {
+            // TODO(smolck): Handle UnmapViewOfFile error?
+            _ = windowsApi.UnmapViewOfFile(mapped.ptr);
+
+            std.os.windows.CloseHandle(mapped.hmap);
+            std.os.windows.CloseHandle(mapped.hfile);
+        } else {
+            defer std.os.munmap(mapped);
+        }
+    }
+
+    const source = a: {
+        if (OS_TAG == .windows) {
+            const cast = @ptrCast([*:0]const u8, mapped.ptr);
+            break :a std.meta.assumeSentinel(cast[0..mapped.size], 0);
+        } else {
+            break :a std.meta.assumeSentinel(mapped, 0);
+        }
+    };
 
     var allocator = self.allocator;
     var ast = try std.zig.parse(allocator, source);
