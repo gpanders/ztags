@@ -513,7 +513,10 @@ test "escape" {
 
 test "Tags.findTags" {
     var test_dir = try std.fs.cwd().makeOpenPath("test", .{});
-    defer std.fs.cwd().deleteTree("test") catch unreachable;
+    defer {
+        test_dir.close();
+        std.fs.cwd().deleteTree("test") catch unreachable;
+    }
 
     const a_src =
         \\const b = @import("b.zig");
