@@ -570,26 +570,30 @@ test "Tags.findTags" {
     const full_path = try test_dir.realpathAlloc(std.testing.allocator, "a.zig");
     try tags.findTags(full_path);
 
+    const cwd = try std.fs.cwd().openDir(".", .{});
+    try test_dir.setAsCwd();
+    defer cwd.setAsCwd() catch unreachable;
+
     const actual = try tags.write(true);
     defer std.testing.allocator.free(actual);
 
     const golden =
         \\!_TAG_FILE_SORTED	1	/1 = sorted/
         \\!_TAG_FILE_ENCODING	utf-8
-        \\MyEnum	test/a.zig	/^const MyEnum = enum {$/;"	enum
-        \\MyStruct	test/a.zig	/^const MyStruct = struct {$/;"	struct
-        \\MyUnion	test/a.zig	/^const MyUnion = union(enum) {$/;"	union
-        \\a	test/a.zig	/a/;"	field
-        \\anotherFunction	test/b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
-        \\b	test/a.zig	/b/;"	field
-        \\c	test/a.zig	/c: u8/;"	field
-        \\d	test/a.zig	/d: u8/;"	field
-        \\e	test/a.zig	/e: void/;"	field
-        \\f	test/a.zig	/f: u32/;"	field
-        \\myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
-        \\x	test/a.zig	/const x = switch (e) {$/;"	constant
-        \\y	test/a.zig	/const y = switch (u) {$/;"	constant
-        \\y	test/b.zig	/var y = x + 1/;"	variable
+        \\MyEnum	a.zig	/^const MyEnum = enum {$/;"	enum
+        \\MyStruct	a.zig	/^const MyStruct = struct {$/;"	struct
+        \\MyUnion	a.zig	/^const MyUnion = union(enum) {$/;"	union
+        \\a	a.zig	/a/;"	field
+        \\anotherFunction	b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
+        \\b	a.zig	/b/;"	field
+        \\c	a.zig	/c: u8/;"	field
+        \\d	a.zig	/d: u8/;"	field
+        \\e	a.zig	/e: void/;"	field
+        \\f	a.zig	/f: u32/;"	field
+        \\myFunction	a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
+        \\x	a.zig	/const x = switch (e) {$/;"	constant
+        \\y	a.zig	/const y = switch (u) {$/;"	constant
+        \\y	b.zig	/var y = x + 1/;"	variable
         \\
     ;
 
@@ -600,20 +604,20 @@ test "Tags.read" {
     const input =
         \\!_TAG_FILE_SORTED	1	/1 = sorted/
         \\!_TAG_FILE_ENCODING	utf-8
-        \\MyEnum	test/a.zig	/^const MyEnum = enum {$/;"	enum
-        \\MyStruct	test/a.zig	/^const MyStruct = struct {$/;"	struct
-        \\MyUnion	test/a.zig	/^const MyUnion = union(enum) {$/;"	union
-        \\a	test/a.zig	/a/;"	field
-        \\anotherFunction	test/b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
-        \\b	test/a.zig	/b/;"	field
-        \\c	test/a.zig	/c: u8/;"	field
-        \\d	test/a.zig	/d: u8/;"	field
-        \\e	test/a.zig	/e: void/;"	field
-        \\f	test/a.zig	/f: u32/;"	field
-        \\myFunction	test/a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
-        \\x	test/a.zig	/const x = switch (e) {$/;"	constant
-        \\y	test/a.zig	/const y = switch (u) {$/;"	constant
-        \\y	test/b.zig	/var y = x + 1/;"	variable
+        \\MyEnum	a.zig	/^const MyEnum = enum {$/;"	enum
+        \\MyStruct	a.zig	/^const MyStruct = struct {$/;"	struct
+        \\MyUnion	a.zig	/^const MyUnion = union(enum) {$/;"	union
+        \\a	a.zig	/a/;"	field
+        \\anotherFunction	b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
+        \\b	a.zig	/b/;"	field
+        \\c	a.zig	/c: u8/;"	field
+        \\d	a.zig	/d: u8/;"	field
+        \\e	a.zig	/e: void/;"	field
+        \\f	a.zig	/f: u32/;"	field
+        \\myFunction	a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
+        \\x	a.zig	/const x = switch (e) {$/;"	constant
+        \\y	a.zig	/const y = switch (u) {$/;"	constant
+        \\y	b.zig	/var y = x + 1/;"	variable
         \\
     ;
 
