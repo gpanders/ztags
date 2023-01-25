@@ -1,11 +1,19 @@
 const std = @import("std");
 
+const OS_TAG = @import("builtin").os.tag;
+
 pub fn build(b: *std.build.Builder) void {
     const target = b.standardTargetOptions(.{});
     const mode = b.standardReleaseOptions();
 
     const exe = b.addExecutable("ztags", "src/main.zig");
     exe.setTarget(target);
+
+    if (OS_TAG == .windows) {
+        // For file mapping API
+        exe.linkLibC();
+    }
+
     exe.setBuildMode(mode);
     exe.install();
 
@@ -19,6 +27,12 @@ pub fn build(b: *std.build.Builder) void {
     run_step.dependOn(&run_cmd.step);
 
     const exe_tests = b.addTest("src/main.zig");
+
+    if (OS_TAG == .windows) {
+        // For file mapping API
+        exe_tests.linkLibC();
+    }
+
     exe_tests.setTarget(target);
     exe_tests.setBuildMode(mode);
 
