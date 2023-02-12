@@ -88,6 +88,48 @@ pub fn deinit(self: *Tags) void {
     self.visited.deinit();
 }
 
+/// On Unix systems, memory map the given file. On Windows, just use read() for now (which
+/// allocates, and is slower, but is only temporary until a cross-platform "map file" function
+/// exists in the stdlib (or until someone implements it here)).
+fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
+    var file = try std.fs.cwd().openFile(fname, .{});
+    defer file.close();
+
+    const metadata = try file.metadata();
+    const size = metadata.size();
+    if (size == 0) {
+        return null;
+    }
+
+    if (metadata.kind() == .Directory) {
+        return error.NotFile;
+    }
+
+    switch (@import("builtin").os.tag) {
+        .windows => {
+            var array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
+            defer array_list.deinit();
+            try file.reader().readAllArrayList(&array_list, size + 1);
+            return try array_list.toOwnedSliceSentinel(0);
+        },
+        else => {
+            var mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
+            return std.meta.assumeSentinel(mapped, 0);
+        },
+    }
+}
+
+/// Unmap a file. On Windows, frees the allocated slice. See comments on mapFile.
+fn unmap(allocator: std.mem.Allocator, slice: [:0]const u8) void {
+    switch (@import("builtin").os.tag) {
+        .windows => allocator.free(slice),
+        else => {
+            const aligned = @alignCast(std.mem.page_size, slice);
+            std.os.munmap(aligned);
+        },
+    }
+}
+
 pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     const gop = try self.visited.getOrPut(fname);
     if (gop.found_existing) {
@@ -95,25 +137,8 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     }
     gop.value_ptr.* = {};
 
-    const mapped = a: {
-        var file = try std.fs.cwd().openFile(fname, .{});
-        defer file.close();
-
-        const metadata = try file.metadata();
-        const size = metadata.size();
-        if (size == 0) {
-            return;
-        }
-
-        if (metadata.kind() == .Directory) {
-            return error.NotFile;
-        }
-
-        break :a try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
-    };
-    defer std.os.munmap(mapped);
-
-    const source = std.meta.assumeSentinel(mapped, 0);
+    const source = (try mapFile(self.allocator, fname)) orelse return;
+    defer unmap(self.allocator, source);
 
     var allocator = self.allocator;
     var ast = try std.zig.parse(allocator, source);
