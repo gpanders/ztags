@@ -114,7 +114,7 @@ fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
         },
         else => {
             var mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
-            return std.meta.assumeSentinel(mapped, 0);
+            return @ptrCast([:0]const u8, mapped);
         },
     }
 }
@@ -141,7 +141,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     defer unmap(self.allocator, source);
 
     var allocator = self.allocator;
-    var ast = try std.zig.parse(allocator, source);
+    var ast = try std.zig.Ast.parse(allocator, source, .zig);
     defer ast.deinit(allocator);
 
     var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
