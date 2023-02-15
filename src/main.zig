@@ -48,14 +48,14 @@ pub fn main() anyerror!u8 {
         defer allocator.free(content);
         try std.io.getStdOut().writeAll(content);
     } else {
-        var file = try std.fs.cwd().createFile(options.output, .{ .read = true, .truncate = false });
-        defer file.close();
-
         if (options.append) {
-            const contents = try file.readToEndAlloc(allocator, std.math.maxInt(u32));
-            defer allocator.free(contents);
-
-            try tags.read(contents);
+            if (std.fs.cwd().readFileAlloc(allocator, options.output, std.math.maxInt(u32))) |contents| {
+                defer allocator.free(contents);
+                try tags.read(contents);
+            } else |err| switch (err) {
+                error.FileNotFound => {},
+                else => return err,
+            }
         }
 
         const content = try tags.write(options.relative);
