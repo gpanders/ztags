@@ -319,7 +319,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
         }
         filename = gop.key_ptr.*;
 
-        text = try std.mem.replaceOwned(u8, self.allocator, text.?, "\\/", "/");
+        text = try unescape(self.allocator, text.?);
         errdefer self.allocator.free(text.?);
 
         try self.entries.append(self.allocator, .{
@@ -518,21 +518,62 @@ fn escape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
     return try output.toOwnedSlice();
 }
 
-test "escape" {
+fn unescape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+    const escape_chars = "\\/";
+
+    var unescaped = try allocator.alloc(u8, text.len);
+
+    // k is the index of the current character in the original text
+    var k: usize = 0;
+    const new_length = for (unescaped) |*c, i| {
+        if (k >= text.len) {
+            break i;
+        }
+
+        if (k < text.len - 1 and
+            text[k] == '\\' and
+            std.mem.indexOfScalar(u8, escape_chars, text[k + 1]) != null)
+        {
+            k += 1;
+        }
+
+        c.* = text[k];
+        k += 1;
+    } else unescaped.len;
+
+    if (new_length < unescaped.len) {
+        std.debug.assert(allocator.resize(unescaped, new_length));
+        unescaped.len = new_length;
+    }
+
+    return unescaped;
+}
+
+test "escape and unescape" {
     var allocator = std.testing.allocator;
 
     {
-        const unescaped = "and/or\\/";
-        const escaped = try escape(allocator, unescaped);
+        const original = "and/or\\/";
+        const escaped = try escape(allocator, original);
         defer allocator.free(escaped);
 
+        const unescaped = try unescape(allocator, escaped);
+        defer allocator.free(unescaped);
+
         try std.testing.expectEqualStrings("and\\/or\\\\\\/", escaped);
+        try std.testing.expectEqualStrings(original, unescaped);
     }
 
     {
-        const unescaped = "hello world";
-        const escaped = try escape(allocator, unescaped);
-        try std.testing.expectEqualStrings(unescaped, escaped);
+        const original = "hello world";
+        const escaped = try escape(allocator, original);
+        // No free necessary, allocation does not occur when there is nothing to escape
+        try std.testing.expectEqual(escaped.ptr, original);
+        try std.testing.expectEqualStrings(original, escaped);
+
+        const unescaped = try unescape(allocator, escaped);
+        defer allocator.free(unescaped);
+        try std.testing.expectEqualStrings(original, unescaped);
     }
 }
 
