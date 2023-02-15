@@ -12,7 +12,7 @@ Simply clone this repository and build with `zig build`. This will produce a
 bit slow. To build a release build use
 
 ```console
-$ zig build -Drelease-safe
+$ zig build -Doptimize=ReleaseSafe
 ```
 
 The `master` branch tracks Zig `HEAD`. Use the `0.10.0` branch if using a
