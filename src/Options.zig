@@ -9,11 +9,14 @@ arguments: []const []const u8 = undefined,
 
 const OptionField = std.meta.FieldEnum(Options);
 
-const options_map = std.ComptimeStringMap(OptionField, .{
-    .{ "o", .output },
-    .{ "r", .relative },
-    .{ "a", .append },
-});
+fn getOption(opt: u8) ?OptionField {
+    return switch (opt) {
+        'a' => .append,
+        'o' => .output,
+        'r' => .relative,
+        else => null,
+    };
+}
 
 fn usage(exe: []const u8) void {
     std.debug.print("Usage: {s} [-o OUTPUT] [-a] [-r] FILES...\n", .{exe});
@@ -27,7 +30,7 @@ pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
 
     return parseIter(allocator, &it, rc) catch |err| {
         switch (err) {
-            error.InvalidOption, error.MissingArguments => usage(exe orelse "ztags"),
+            error.InvalidOption, error.MissingArgument => usage(exe orelse "ztags"),
             else => {},
         }
 
@@ -57,16 +60,23 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
             if (arg.len < 2) {
                 rc.* = 1;
                 return error.InvalidOption;
-            } else if (options_map.get(arg[1..])) |opt| {
-                switch (opt) {
-                    .output => next_option = opt,
-                    .relative => options.relative = true,
-                    .append => options.append = true,
-                    else => unreachable,
+            } else for (arg[1..]) |c| {
+                if (next_option != null) {
+                    rc.* = 1;
+                    return error.MissingArgument;
                 }
-            } else {
-                rc.* = if (std.mem.eql(u8, arg[1..], "h")) 0 else 1;
-                return error.InvalidOption;
+
+                if (getOption(c)) |opt| {
+                    switch (opt) {
+                        .output => next_option = opt,
+                        .relative => options.relative = true,
+                        .append => options.append = true,
+                        else => unreachable,
+                    }
+                } else {
+                    rc.* = if (c == 'h') 0 else 1;
+                    return error.InvalidOption;
+                }
             }
         } else {
             const a = try allocator.dupe(u8, arg);
@@ -77,7 +87,7 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
 
     if (next_option) |_| {
         rc.* = 1;
-        return error.MissingArguments;
+        return error.MissingArgument;
     }
 
     if (options.output.len == 0) {
@@ -86,8 +96,10 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
 
     if (arguments.items.len == 0) {
         rc.* = 1;
-        return error.MissingArguments;
+        return error.MissingArgument;
     }
+
+    rc.* = 0;
 
     options.arguments = arguments.toOwnedSlice();
     return options;
@@ -160,22 +172,49 @@ test "parseIter" {
     }
 
     {
-        // Missing arguments
+        // error: Missing arguments
         var it = TestIterator.init(&.{
             "-o", "foo",
         });
 
         var options = Options.parseIter(std.testing.allocator, &it, &rc);
-        try std.testing.expectError(error.MissingArguments, options);
+        try std.testing.expectEqual(@as(u8, 1), rc);
+        try std.testing.expectError(error.MissingArgument, options);
     }
 
     {
-        // Missing option value
+        // error: Missing option value
         var it = TestIterator.init(&.{
             "hello.zig", "-o",
         });
 
         var options = Options.parseIter(std.testing.allocator, &it, &rc);
-        try std.testing.expectError(error.MissingArguments, options);
+        try std.testing.expectEqual(@as(u8, 1), rc);
+        try std.testing.expectError(error.MissingArgument, options);
+    }
+
+    {
+        // Multiple options
+        var it = TestIterator.init(&.{
+            "-rao", "tags", "hello.zig",
+        });
+
+        var options = try Options.parseIter(std.testing.allocator, &it, &rc);
+        defer options.deinit(std.testing.allocator);
+
+        try std.testing.expectEqual(@as(u8, 0), rc);
+        try std.testing.expectEqual(true, options.relative);
+        try std.testing.expectEqual(true, options.append);
+    }
+
+    {
+        // error: Option after option that expects argument
+        var it = TestIterator.init(&.{
+            "-roa", "tags", "hello.zig",
+        });
+
+        var options = Options.parseIter(std.testing.allocator, &it, &rc);
+        try std.testing.expectEqual(@as(u8, 1), rc);
+        try std.testing.expectError(error.MissingArgument, options);
     }
 }
