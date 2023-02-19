@@ -16,7 +16,7 @@ pub fn main() anyerror!u8 {
     var options = a: {
         var rc: u8 = 0;
         break :a Options.parse(allocator, &rc) catch |err| switch (err) {
-            error.InvalidOption, error.MissingArguments => return rc,
+            error.InvalidOption, error.MissingArgument => return rc,
             else => return err,
         };
     };
