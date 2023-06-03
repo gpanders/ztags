@@ -101,7 +101,7 @@ fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
         return null;
     }
 
-    if (metadata.kind() == .Directory) {
+    if (metadata.kind() == .directory) {
         return error.NotFile;
     }
 
