@@ -386,7 +386,7 @@ pub fn write(self: *Tags, relative: bool) ![]const u8 {
 }
 
 fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !EntryList {
-    std.sort.sort(Entry, orig.items, {}, struct {
+    std.mem.sort(Entry, orig.items, {}, struct {
         fn lessThan(_: void, a: Entry, b: Entry) bool {
             return switch (std.mem.order(u8, a.ident, b.ident)) {
                 .lt => true,
