@@ -149,7 +149,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
     const data = ast.nodes.items(.data);
-    for (tags) |node, i| {
+    for (tags, 0..) |node, i| {
         var ident: ?[]const u8 = null;
         var kind: ?Kind = null;
 
@@ -404,7 +404,7 @@ fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !EntryList {
     var deduplicated_entries = EntryList{};
 
     var last_unique: usize = 0;
-    for (orig.items) |entry, i| {
+    for (orig.items, 0..) |entry, i| {
         if (i == 0 or !orig.items[last_unique].eql(entry)) {
             try deduplicated_entries.append(allocator, entry);
             last_unique = i;
@@ -525,7 +525,7 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
 
     // k is the index of the current character in the original text
     var k: usize = 0;
-    const new_length = for (unescaped) |*c, i| {
+    const new_length = for (unescaped, 0..) |*c, i| {
         if (k >= text.len) {
             break i;
         }
