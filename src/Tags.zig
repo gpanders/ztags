@@ -343,7 +343,7 @@ pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const
         \\
     );
 
-    self.entries = try removeDuplicates(self.allocator, &self.entries);
+    try removeDuplicates(self.allocator, &self.entries);
 
     const cwd = if (relative)
         try std.fs.realpathAlloc(allocator, ".")
@@ -385,7 +385,12 @@ pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const
     return contents.toOwnedSlice();
 }
 
-fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !EntryList {
+/// Remove duplicates from an EntryList in place. Invalidates pointers.
+///
+/// This function allocates memory equal to the size of `orig`.
+/// The items in `orig` are first sorted and unique items are copied to a newly allocated
+/// array. The original array is freed and `orig` is updated to use the newly allocated array.
+fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !void {
     std.sort.sort(Entry, orig.items, {}, struct {
         fn lessThan(_: void, a: Entry, b: Entry) bool {
             return switch (std.mem.order(u8, a.ident, b.ident)) {
@@ -399,21 +404,22 @@ fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !EntryList {
             };
         }
     }.lessThan);
-    defer orig.deinit(allocator);
 
-    var deduplicated_entries = EntryList{};
+    var deduplicated_entries = try std.ArrayList(Entry).initCapacity(allocator, orig.items.len);
+    defer deduplicated_entries.deinit();
 
     var last_unique: usize = 0;
     for (orig.items) |entry, i| {
         if (i == 0 or !orig.items[last_unique].eql(entry)) {
-            try deduplicated_entries.append(allocator, entry);
+            deduplicated_entries.appendAssumeCapacity(entry);
             last_unique = i;
         } else {
             entry.deinit(allocator);
         }
     }
 
-    return deduplicated_entries;
+    allocator.free(orig.allocatedSlice());
+    orig.* = deduplicated_entries.moveToUnmanaged();
 }
 
 test "removeDuplicates" {
@@ -457,19 +463,19 @@ test "removeDuplicates" {
         },
     };
 
-    var orig = EntryList{};
-    try orig.appendSlice(allocator, &input);
-
-    var deduplicated = try removeDuplicates(allocator, &orig);
+    var entries = EntryList{};
+    try entries.appendSlice(allocator, &input);
     defer {
-        for (deduplicated.items) |entry| entry.deinit(allocator);
-        deduplicated.deinit(allocator);
+        for (entries.items) |entry| entry.deinit(allocator);
+        entries.deinit(allocator);
     }
 
-    try std.testing.expectEqual(@as(usize, 3), deduplicated.items.len);
-    try std.testing.expectEqual(input[2], deduplicated.items[0]);
-    try std.testing.expectEqual(input[3], deduplicated.items[1]);
-    try std.testing.expectEqual(input[0], deduplicated.items[2]);
+    try removeDuplicates(allocator, &entries);
+
+    try std.testing.expectEqual(@as(usize, 3), entries.items.len);
+    try std.testing.expectEqual(input[2], entries.items[0]);
+    try std.testing.expectEqual(input[3], entries.items[1]);
+    try std.testing.expectEqual(input[0], entries.items[2]);
 }
 
 fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ![]const u8 {
