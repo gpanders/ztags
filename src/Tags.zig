@@ -331,8 +331,8 @@ pub fn read(self: *Tags, data: []const u8) !void {
     }
 }
 
-pub fn write(self: *Tags, relative: bool) ![]const u8 {
-    var contents = std.ArrayList(u8).init(self.allocator);
+pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const u8 {
+    var contents = std.ArrayList(u8).init(allocator);
     defer contents.deinit();
 
     var writer = contents.writer();
@@ -346,29 +346,29 @@ pub fn write(self: *Tags, relative: bool) ![]const u8 {
     self.entries = try removeDuplicates(self.allocator, &self.entries);
 
     const cwd = if (relative)
-        try std.fs.realpathAlloc(self.allocator, ".")
+        try std.fs.realpathAlloc(allocator, ".")
     else
         null;
-    defer if (cwd) |c| self.allocator.free(c);
+    defer if (cwd) |c| allocator.free(c);
 
     // Cache relative paths to avoid recalculating for the same absolute path. If the relative paths
     // option is not enabled this has no cost other than some stack space and a couple of no-op
     // function calls
-    var relative_paths = std.StringHashMap([]const u8).init(self.allocator);
+    var relative_paths = std.StringHashMap([]const u8).init(allocator);
     defer {
         var it = relative_paths.valueIterator();
-        while (it.next()) |val| self.allocator.free(val.*);
+        while (it.next()) |val| allocator.free(val.*);
         relative_paths.deinit();
     }
 
     for (self.entries.items) |entry| {
-        const text = try escape(self.allocator, entry.text);
-        defer if (text.ptr != entry.text.ptr) self.allocator.free(text);
+        const text = try escape(allocator, entry.text);
+        defer if (text.ptr != entry.text.ptr) allocator.free(text);
 
         const filename = if (cwd) |c| filename: {
             const gop = try relative_paths.getOrPut(entry.filename);
             if (!gop.found_existing) {
-                gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, entry.filename);
+                gop.value_ptr.* = try std.fs.path.relative(allocator, c, entry.filename);
             }
 
             break :filename gop.value_ptr.*;
@@ -643,7 +643,7 @@ test "Tags.findTags" {
     try test_dir.setAsCwd();
     defer cwd.setAsCwd() catch unreachable;
 
-    const actual = try tags.write(true);
+    const actual = try tags.write(std.testing.allocator, true);
     defer std.testing.allocator.free(actual);
 
     const golden =
@@ -694,7 +694,7 @@ test "Tags.read" {
     defer tags.deinit();
 
     try tags.read(input);
-    const output = try tags.write(true);
+    const output = try tags.write(std.testing.allocator, true);
     defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings(input, output);

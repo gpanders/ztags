@@ -44,7 +44,7 @@ pub fn main() anyerror!u8 {
     }
 
     if (std.mem.eql(u8, options.output, "-")) {
-        const content = try tags.write(options.relative);
+        const content = try tags.write(allocator, options.relative);
         defer allocator.free(content);
         try std.io.getStdOut().writeAll(content);
     } else {
@@ -58,7 +58,7 @@ pub fn main() anyerror!u8 {
             }
         }
 
-        const content = try tags.write(options.relative);
+        const content = try tags.write(allocator, options.relative);
         defer allocator.free(content);
 
         try std.fs.cwd().writeFile(options.output, content);
