@@ -51,7 +51,7 @@ Have a question, comment, or feature request? Send an email to the [mailing
 list][list].
 
 Report bugs on the [ticket tracker][tickets]. You can file a ticket without a
-sourcehut account by sending a [plain text email](useplaintext.email) to
+sourcehut account by sending a [plain text email](https://useplaintext.email) to
 [~gpanders/ztags@todo.sr.ht](mailto://~gpanders/ztags@todo.sr.ht).
 
 Send patches to [~gpanders/ztags@lists.sr.ht][list] or open a pull request on
