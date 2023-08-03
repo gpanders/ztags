@@ -38,7 +38,7 @@ const Kind = enum {
                 std.debug.print("Kind variant \"{s}\" missing in Kind.parse()\n", .{field.name});
                 return error.MissingParseVariant;
             };
-            try std.testing.expectEqual(parsed, @intToEnum(Kind, field.value));
+            try std.testing.expectEqual(parsed, @as(Kind, @enumFromInt(field.value)));
         }
     }
 };
@@ -114,7 +114,7 @@ fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
         },
         else => {
             var mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
-            return @ptrCast([:0]const u8, mapped);
+            return @as([:0]const u8, @ptrCast(mapped));
         },
     }
 }
@@ -124,8 +124,7 @@ fn unmap(allocator: std.mem.Allocator, slice: [:0]const u8) void {
     switch (@import("builtin").os.tag) {
         .windows => allocator.free(slice),
         else => {
-            const aligned = @alignCast(std.mem.page_size, slice);
-            std.os.munmap(aligned);
+            std.os.munmap(@alignCast(slice));
         },
     }
 }
@@ -264,7 +263,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
             .ident = try allocator.dupe(u8, ident.?),
             .filename = fname,
             .kind = kind.?,
-            .text = try getNodeText(allocator, ast, @intCast(u32, i)),
+            .text = try getNodeText(allocator, ast, @as(u32, @intCast(i))),
         });
     }
 }
