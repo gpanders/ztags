@@ -15,7 +15,7 @@ bit slow. To build a release build use
 $ zig build -Doptimize=ReleaseSafe
 ```
 
-The `master` branch tracks Zig `HEAD`. Use the `0.10.0` branch if using a
+The `master` branch tracks Zig `HEAD`. Use the `0.11.0` branch if using a
 stable release.
 
 ## Usage
