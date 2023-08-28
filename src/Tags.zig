@@ -551,13 +551,12 @@ fn escape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSl
 }
 
 fn unescape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSlice(u8) {
-    const escape_chars = "\\/";
     const unescaped_length = blk: {
         var count: usize = 0;
         var start: usize = 0;
-        while (std.mem.indexOfAnyPos(u8, text, start, escape_chars)) |i| {
+        while (std.mem.indexOfScalarPos(u8, text, start, '\\')) |i| {
             count += 1;
-            start = i + 1;
+            start = i + 2;
         }
 
         break :blk text.len - count;
@@ -571,10 +570,7 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocated
 
     var k: usize = 0;
     for (unescaped) |*c| {
-        if (k < text.len - 1 and
-            text[k] == '\\' and
-            std.mem.indexOfScalar(u8, escape_chars, text[k + 1]) != null)
-        {
+        if (k < text.len - 1 and text[k] == '\\') {
             k += 1;
         }
 
@@ -610,7 +606,7 @@ test "escape and unescape" {
         const unescaped = try unescape(allocator, escaped.slice);
         defer unescaped.deinit(allocator);
 
-        try std.testing.expectEqualStrings("pathological text with trailing backslash \\\\", escaped.slice);
+        try std.testing.expectEqualStrings("pathological text with trailing backslash\\\\", escaped.slice);
         try std.testing.expectEqualStrings(original, unescaped.slice);
     }
 
