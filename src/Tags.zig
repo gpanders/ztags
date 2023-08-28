@@ -129,7 +129,7 @@ fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
         },
         else => {
             var mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
-            return @as([:0]const u8, @ptrCast(mapped));
+            return @ptrCast(mapped);
         },
     }
 }
@@ -162,16 +162,16 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
-    const data = ast.nodes.items(.data);
-    for (tags, 0..) |node, i| {
+    const datas = ast.nodes.items(.data);
+    for (tags, tokens, datas, 0..) |tag, token, data, i| {
         var ident: ?[]const u8 = null;
         var kind: ?Kind = null;
 
-        switch (node) {
+        switch (tag) {
             .builtin_call_two => {
-                const builtin = ast.tokenSlice(tokens[i]);
+                const builtin = ast.tokenSlice(token);
                 if (std.mem.eql(u8, builtin[1..], "import")) {
-                    const name_index = tokens[data[i].lhs];
+                    const name_index = tokens[data.lhs];
                     const name = std.mem.trim(u8, ast.tokenSlice(name_index), "\"");
                     if (std.mem.endsWith(u8, name, ".zig")) {
                         const dir = std.fs.path.dirname(fname) orelse continue;
@@ -190,7 +190,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                 continue;
             },
             .fn_decl => {
-                ident = ast.tokenSlice(tokens[i] + 1);
+                ident = ast.tokenSlice(token + 1);
                 kind = .function;
             },
             .global_var_decl,
@@ -198,7 +198,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
             .local_var_decl,
             .aligned_var_decl,
             => {
-                var name = ast.tokenSlice(tokens[i] + 1);
+                var name = ast.tokenSlice(token + 1);
                 if (std.mem.eql(u8, name, "_")) {
                     continue;
                 }
@@ -207,12 +207,12 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                 }
 
                 ident = name;
-                kind = if (std.mem.eql(u8, ast.tokenSlice(tokens[i]), "const"))
+                kind = if (std.mem.eql(u8, ast.tokenSlice(token), "const"))
                     .constant
                 else
                     .variable;
 
-                switch (data[i].rhs) {
+                switch (data.rhs) {
                     0 => {},
                     else => |rhs| switch (tags[rhs]) {
                         .container_decl,
@@ -248,7 +248,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                             // Ignore variables of the form
                             //      const foo = SomeContainer.foo
                             // i.e. when the name of the variable is just an alias to some field
-                            const identifier_token = ast.tokenSlice(data[rhs].rhs);
+                            const identifier_token = ast.tokenSlice(datas[rhs].rhs);
                             if (std.mem.eql(u8, identifier_token, name)) {
                                 continue;
                             }
@@ -261,7 +261,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
             .container_field_align,
             .container_field,
             => {
-                var name = ast.tokenSlice(tokens[i]);
+                var name = ast.tokenSlice(token);
                 if (std.mem.eql(u8, name, "_")) {
                     continue;
                 }
@@ -278,14 +278,14 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
             .ident = try allocator.dupe(u8, ident.?),
             .filename = fname,
             .kind = kind.?,
-            .text = try getNodeText(allocator, ast, @as(u32, @intCast(i))),
+            .text = try getNodeText(allocator, ast, @intCast(i)),
         });
     }
 }
 
 /// Read tags entries from a tags file
 pub fn read(self: *Tags, data: []const u8) !void {
-    var lines = std.mem.tokenize(u8, data, "\n");
+    var lines = std.mem.tokenizeScalar(u8, data, '\n');
     while (lines.next()) |line| {
         if (line.len == 0 or line[0] == '!') {
             continue;
@@ -496,7 +496,11 @@ test "removeDuplicates" {
     try std.testing.expectEqual(input[0], entries.items[2]);
 }
 
-fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ![]const u8 {
+fn getNodeText(
+    allocator: std.mem.Allocator,
+    tree: std.zig.Ast,
+    node: std.zig.Ast.Node.Index,
+) ![]const u8 {
     const token_starts = tree.tokens.items(.start);
     const first_token = tree.firstToken(node);
     const last_token = tree.lastToken(node);
