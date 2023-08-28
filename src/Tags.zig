@@ -547,8 +547,14 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
     } else unescaped.len;
 
     if (new_length < unescaped.len) {
-        std.debug.assert(allocator.resize(unescaped, new_length));
-        unescaped.len = new_length;
+        if (!allocator.resize(unescaped, new_length)) {
+            const p = try allocator.alloc(u8, new_length);
+            @memcpy(p, unescaped[0..new_length]);
+            allocator.free(unescaped);
+            unescaped = p;
+        } else {
+            unescaped.len = new_length;
+        }
     }
 
     return unescaped;
