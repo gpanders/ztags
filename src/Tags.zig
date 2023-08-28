@@ -62,6 +62,21 @@ const Entry = struct {
     }
 };
 
+fn OptionallyAllocatedSlice(comptime T: type) type {
+    return struct {
+        slice: []const T,
+        allocated: bool,
+
+        const Self = @This();
+
+        pub fn deinit(self: Self, allocator: std.mem.Allocator) void {
+            if (self.allocated) {
+                allocator.free(self.slice);
+            }
+        }
+    };
+}
+
 allocator: std.mem.Allocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
@@ -318,7 +333,11 @@ pub fn read(self: *Tags, data: []const u8) !void {
         }
         filename = gop.key_ptr.*;
 
-        text = try unescape(self.allocator, text.?);
+        const unescaped = try unescape(self.allocator, text.?);
+        text = if (unescaped.allocated)
+            unescaped.slice
+        else
+            try self.allocator.dupe(u8, unescaped.slice);
         errdefer self.allocator.free(text.?);
 
         try self.entries.append(self.allocator, .{
@@ -361,8 +380,8 @@ pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const
     }
 
     for (self.entries.items) |entry| {
-        const text = try escape(allocator, entry.text);
-        defer if (text.ptr != entry.text.ptr) allocator.free(text);
+        const escaped = try escape(allocator, entry.text);
+        defer escaped.deinit(allocator);
 
         const filename = if (cwd) |c| filename: {
             const gop = try relative_paths.getOrPut(entry.filename);
@@ -376,7 +395,7 @@ pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const
         try writer.print("{s}\t{s}\t/{s}/;\"\t{s}\n", .{
             entry.ident,
             filename,
-            text,
+            escaped.slice,
             @tagName(entry.kind),
         });
     }
@@ -492,7 +511,7 @@ fn getNodeText(allocator: std.mem.Allocator, tree: std.zig.Ast, node: std.zig.As
     return try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
 }
 
-fn escape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+fn escape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSlice(u8) {
     const escape_chars = "\\/";
     const escaped_length = blk: {
         var count: usize = 0;
@@ -506,35 +525,48 @@ fn escape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
     };
 
     if (text.len == escaped_length) {
-        return text;
+        return .{ .slice = text, .allocated = false };
     }
 
-    var output = try std.ArrayList(u8).initCapacity(allocator, escaped_length);
-    defer output.deinit();
+    var escaped = try allocator.alloc(u8, escaped_length);
 
+    var k: usize = 0;
     for (text) |c| {
         if (std.mem.indexOfScalar(u8, escape_chars, c)) |_| {
-            output.appendAssumeCapacity('\\');
+            escaped[k] = '\\';
+            k += 1;
         }
 
-        output.appendAssumeCapacity(c);
+        escaped[k] = c;
+        k += 1;
     }
 
-    return try output.toOwnedSlice();
+    std.debug.assert(k == escaped_length);
+
+    return .{ .slice = escaped, .allocated = true };
 }
 
-fn unescape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+fn unescape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSlice(u8) {
     const escape_chars = "\\/";
-
-    var unescaped = try allocator.alloc(u8, text.len);
-
-    // k is the index of the current character in the original text
-    var k: usize = 0;
-    const new_length = for (unescaped, 0..) |*c, i| {
-        if (k >= text.len) {
-            break i;
+    const unescaped_length = blk: {
+        var count: usize = 0;
+        var start: usize = 0;
+        while (std.mem.indexOfAnyPos(u8, text, start, escape_chars)) |i| {
+            count += 1;
+            start = i + 1;
         }
 
+        break :blk text.len - count;
+    };
+
+    if (text.len == unescaped_length) {
+        return .{ .slice = text, .allocated = false };
+    }
+
+    var unescaped = try allocator.alloc(u8, unescaped_length);
+
+    var k: usize = 0;
+    for (unescaped) |*c| {
         if (k < text.len - 1 and
             text[k] == '\\' and
             std.mem.indexOfScalar(u8, escape_chars, text[k + 1]) != null)
@@ -544,20 +576,11 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
 
         c.* = text[k];
         k += 1;
-    } else unescaped.len;
-
-    if (new_length < unescaped.len) {
-        if (!allocator.resize(unescaped, new_length)) {
-            const p = try allocator.alloc(u8, new_length);
-            @memcpy(p, unescaped[0..new_length]);
-            allocator.free(unescaped);
-            unescaped = p;
-        } else {
-            unescaped.len = new_length;
-        }
     }
 
-    return unescaped;
+    std.debug.assert(k == text.len);
+
+    return .{ .slice = unescaped, .allocated = true };
 }
 
 test "escape and unescape" {
@@ -566,25 +589,42 @@ test "escape and unescape" {
     {
         const original = "and/or\\/";
         const escaped = try escape(allocator, original);
-        defer allocator.free(escaped);
+        defer escaped.deinit(allocator);
 
-        const unescaped = try unescape(allocator, escaped);
-        defer allocator.free(unescaped);
+        const unescaped = try unescape(allocator, escaped.slice);
+        defer unescaped.deinit(allocator);
 
-        try std.testing.expectEqualStrings("and\\/or\\\\\\/", escaped);
-        try std.testing.expectEqualStrings(original, unescaped);
+        try std.testing.expectEqualStrings("and\\/or\\\\\\/", escaped.slice);
+        try std.testing.expectEqualStrings(original, unescaped.slice);
+    }
+
+    {
+        const original = "pathological text with trailing backslash\\";
+        const escaped = try escape(allocator, original);
+        defer escaped.deinit(allocator);
+
+        const unescaped = try unescape(allocator, escaped.slice);
+        defer unescaped.deinit(allocator);
+
+        try std.testing.expectEqualStrings("pathological text with trailing backslash \\\\", escaped.slice);
+        try std.testing.expectEqualStrings(original, unescaped.slice);
     }
 
     {
         const original = "hello world";
         const escaped = try escape(allocator, original);
-        // No free necessary, allocation does not occur when there is nothing to escape
-        try std.testing.expectEqual(escaped.ptr, original);
-        try std.testing.expectEqualStrings(original, escaped);
 
-        const unescaped = try unescape(allocator, escaped);
-        defer allocator.free(unescaped);
-        try std.testing.expectEqualStrings(original, unescaped);
+        // deinit() intentionally omitted. There should  be no allocation when no characters need to
+        // be escaped. If an allocation does occur this will cause a memory leak and the test will
+        // fail.
+
+        try std.testing.expectEqualStrings(original, escaped.slice);
+
+        const unescaped = try unescape(allocator, escaped.slice);
+
+        // deinit() omitted intentionally -- see above
+
+        try std.testing.expectEqualStrings(original, unescaped.slice);
     }
 }
 
