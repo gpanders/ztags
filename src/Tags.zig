@@ -611,19 +611,17 @@ test "escape and unescape" {
     }
 
     {
+        // No allocation should occur when there is nothing to escape
+        var a = std.testing.failing_allocator;
+
         const original = "hello world";
-        const escaped = try escape(allocator, original);
-
-        // deinit() intentionally omitted. There should  be no allocation when no characters need to
-        // be escaped. If an allocation does occur this will cause a memory leak and the test will
-        // fail.
-
-        try std.testing.expectEqualStrings(original, escaped.slice);
+        const escaped = try escape(a, original);
+        defer escaped.deinit(a);
 
         const unescaped = try unescape(allocator, escaped.slice);
+        defer unescaped.deinit(a);
 
-        // deinit() omitted intentionally -- see above
-
+        try std.testing.expectEqualStrings(original, escaped.slice);
         try std.testing.expectEqualStrings(original, unescaped.slice);
     }
 }
