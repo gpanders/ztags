@@ -15,8 +15,19 @@ bit slow. To build a release build use
 $ zig build -Doptimize=ReleaseSafe
 ```
 
+To build the man page (requires [scdoc][]), run
+
+```console
+$ zig build docs
+```
+
+This will install the man page to `man/man1/ztags.1` relative to the prefix
+given with `-p`/`--prefix` (default `zig-out`).
+
 The `master` branch tracks Zig `HEAD`. Use the `0.11.0` branch if using a
 stable release.
+
+[scdoc]: https://sr.ht/~sircmpwn/scdoc/
 
 ## Usage
 

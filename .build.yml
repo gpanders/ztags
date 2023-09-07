@@ -1,11 +1,15 @@
 image: alpine/edge
 packages:
     - git
+    - scdoc
 secrets:
     - 78f39fb6-1185-492f-9c21-f755e10b5e5d # ssh key for mirroring
 environment:
     GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=no
 tasks:
+    - docs: |
+        # Make sure there are no errors in the man page source
+        scdoc < ztags/ztags.1.scd >/dev/null
     - mirror: |
         # Don't run on GitHub PRs
         if [ "$BUILD_REASON" = 'github-pr' ]; then
@@ -13,7 +17,4 @@ tasks:
         fi
 
         git clone --mirror https://git.sr.ht/~gpanders/ztags ztags.git
-        cd ztags.git
-        git push --force --mirror git@github.com:gpanders/ztags
-        cd ..
-        rm -rf ztags.git
+        git -C ztags.git push --force --mirror git@github.com:gpanders/ztags
