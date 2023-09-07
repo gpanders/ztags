@@ -36,7 +36,9 @@ pub fn build(b: *std.build.Builder) void {
     const docs_cmd = b.addSystemCommand(&.{"scdoc"});
     docs_cmd.setStdIn(.{ .lazy_path = .{ .path = "ztags.1.scd" } });
     const docs_out = docs_cmd.captureStdOut();
-    const docs = b.addInstallFileWithDir(docs_out, .{ .custom = b.pathJoin(&.{ "man", "man1" }) }, "ztags.1");
+    const docs = b.addInstallFileWithDir(docs_out, .{
+        .custom = b.pathJoin(&.{ "share", "man", "man1" }),
+    }, "ztags.1");
 
     const docs_step = b.step("docs", "Build documentation");
     docs_step.dependOn(&docs.step);
