@@ -21,8 +21,15 @@ To build the man page (requires [scdoc][]), run
 $ zig build docs
 ```
 
-This will install the man page to `man/man1/ztags.1` relative to the prefix
-given with `-p`/`--prefix` (default `zig-out`).
+This will install the man page to `share/man/man1/ztags.1` relative to the
+prefix given with `-p`/`--prefix` (default `zig-out`).
+
+To build and install both `ztags` and the man page to `$PREFIX` simultaneously,
+use
+
+```console
+$ zig build -Doptimize=ReleaseSafe -p $PREFIX install docs
+```
 
 The `master` branch tracks Zig `HEAD`. Use the `0.11.0` branch if using a
 stable release.
