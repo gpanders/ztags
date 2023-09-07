@@ -32,4 +32,12 @@ pub fn build(b: *std.build.Builder) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const docs_cmd = b.addSystemCommand(&.{"scdoc"});
+    docs_cmd.setStdIn(.{ .lazy_path = .{ .path = "ztags.1.scd" } });
+    const docs_out = docs_cmd.captureStdOut();
+    const docs = b.addInstallFileWithDir(docs_out, .{ .custom = b.pathJoin(&.{ "man", "man1" }) }, "ztags.1");
+
+    const docs_step = b.step("docs", "Build documentation");
+    docs_step.dependOn(&docs.step);
 }
