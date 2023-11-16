@@ -107,7 +107,7 @@ pub fn deinit(self: *Tags) void {
 /// allocates, and is slower, but is only temporary until a cross-platform "map file" function
 /// exists in the stdlib (or until someone implements it here)).
 fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
-    var file = try std.fs.cwd().openFile(fname, .{});
+    const file = try std.fs.cwd().openFile(fname, .{});
     defer file.close();
 
     const metadata = try file.metadata();
@@ -122,13 +122,13 @@ fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
 
     switch (@import("builtin").os.tag) {
         .windows => {
-            var array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
+            const array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
             defer array_list.deinit();
             try file.reader().readAllArrayList(&array_list, size + 1);
             return try array_list.toOwnedSliceSentinel(0);
         },
         else => {
-            var mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
+            const mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
             return @ptrCast(mapped);
         },
     }
