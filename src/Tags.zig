@@ -566,7 +566,7 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocated
         return .{ .slice = text, .allocated = false };
     }
 
-    var unescaped = try allocator.alloc(u8, unescaped_length);
+    const unescaped = try allocator.alloc(u8, unescaped_length);
 
     var k: usize = 0;
     for (unescaped) |*c| {
@@ -584,7 +584,7 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocated
 }
 
 test "escape and unescape" {
-    var allocator = std.testing.allocator;
+    const allocator = std.testing.allocator;
 
     {
         const original = "and/or\\/";
@@ -612,7 +612,7 @@ test "escape and unescape" {
 
     {
         // No allocation should occur when there is nothing to escape
-        var a = std.testing.failing_allocator;
+        const a = std.testing.failing_allocator;
 
         const original = "hello world";
         const escaped = try escape(a, original);

@@ -177,7 +177,7 @@ test "parseIter" {
             "-o", "foo",
         });
 
-        var options = Options.parseIter(std.testing.allocator, &it, &rc);
+        const options = Options.parseIter(std.testing.allocator, &it, &rc);
         try std.testing.expectEqual(@as(u8, 1), rc);
         try std.testing.expectError(error.MissingArgument, options);
     }
@@ -188,7 +188,7 @@ test "parseIter" {
             "hello.zig", "-o",
         });
 
-        var options = Options.parseIter(std.testing.allocator, &it, &rc);
+        const options = Options.parseIter(std.testing.allocator, &it, &rc);
         try std.testing.expectEqual(@as(u8, 1), rc);
         try std.testing.expectError(error.MissingArgument, options);
     }
@@ -213,7 +213,7 @@ test "parseIter" {
             "-roa", "tags", "hello.zig",
         });
 
-        var options = Options.parseIter(std.testing.allocator, &it, &rc);
+        const options = Options.parseIter(std.testing.allocator, &it, &rc);
         try std.testing.expectEqual(@as(u8, 1), rc);
         try std.testing.expectError(error.MissingArgument, options);
     }
