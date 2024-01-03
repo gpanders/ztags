@@ -30,6 +30,7 @@ pub fn main() anyerror!u8 {
             try allocator.dupe(u8, fname)
         else
             try std.fs.cwd().realpathAlloc(allocator, fname);
+        defer allocator.free(full_fname);
 
         tags.findTags(full_fname) catch |err| switch (err) {
             error.NotFile => {

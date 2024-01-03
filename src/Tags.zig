@@ -103,10 +103,7 @@ pub fn deinit(self: *Tags) void {
     self.visited.deinit();
 }
 
-/// On Unix systems, memory map the given file. On Windows, just use read() for now (which
-/// allocates, and is slower, but is only temporary until a cross-platform "map file" function
-/// exists in the stdlib (or until someone implements it here)).
-fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
+fn readFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
     const file = try std.fs.cwd().openFile(fname, .{});
     defer file.close();
 
@@ -120,39 +117,25 @@ fn mapFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
         return error.NotFile;
     }
 
-    switch (@import("builtin").os.tag) {
-        .windows => {
-            const array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
-            defer array_list.deinit();
-            try file.reader().readAllArrayList(&array_list, size + 1);
-            return try array_list.toOwnedSliceSentinel(0);
-        },
-        else => {
-            const mapped = try std.os.mmap(null, size, std.os.PROT.READ, std.os.MAP.SHARED, file.handle, 0);
-            return @ptrCast(mapped);
-        },
-    }
-}
-
-/// Unmap a file. On Windows, frees the allocated slice. See comments on mapFile.
-fn unmap(allocator: std.mem.Allocator, slice: [:0]const u8) void {
-    switch (@import("builtin").os.tag) {
-        .windows => allocator.free(slice),
-        else => {
-            std.os.munmap(@alignCast(slice));
-        },
-    }
+    var array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
+    defer array_list.deinit();
+    try file.reader().readAllArrayList(&array_list, size + 1);
+    return try array_list.toOwnedSliceSentinel(0);
 }
 
 pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
-    const gop = try self.visited.getOrPut(fname);
+    const fname_ = try self.allocator.dupe(u8, fname);
+    const gop = try self.visited.getOrPut(fname_);
     if (gop.found_existing) {
+        // Entry already exists in the visited map, so free the duplicated
+        // filename
+        self.allocator.free(fname_);
         return;
     }
     gop.value_ptr.* = {};
 
-    const source = (try mapFile(self.allocator, fname)) orelse return;
-    defer unmap(self.allocator, source);
+    const source = try readFile(self.allocator, fname_) orelse return;
+    defer self.allocator.free(source);
 
     var allocator = self.allocator;
     var ast = try std.zig.Ast.parse(allocator, source, .zig);
@@ -174,13 +157,15 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                     const name_index = tokens[data.lhs];
                     const name = std.mem.trim(u8, ast.tokenSlice(name_index), "\"");
                     if (std.mem.endsWith(u8, name, ".zig")) {
-                        const dir = std.fs.path.dirname(fname) orelse continue;
+                        const dir = std.fs.path.dirname(fname_) orelse continue;
                         const import_fname = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{
                             dir,
                             name,
                         });
 
                         const resolved = try std.fs.path.resolve(allocator, &.{import_fname});
+                        defer allocator.free(resolved);
+
                         self.findTags(resolved) catch |err| switch (err) {
                             error.FileNotFound => continue,
                             else => return err,
@@ -276,7 +261,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
 
         try self.entries.append(allocator, .{
             .ident = try allocator.dupe(u8, ident.?),
-            .filename = fname,
+            .filename = fname_,
             .kind = kind.?,
             .text = try getNodeText(allocator, ast, @intCast(i)),
         });
@@ -686,6 +671,7 @@ test "Tags.findTags" {
     defer tags.deinit();
 
     const full_path = try test_dir.realpathAlloc(std.testing.allocator, "a.zig");
+    defer std.testing.allocator.free(full_path);
     try tags.findTags(full_path);
 
     const cwd = try std.fs.cwd().openDir(".", .{});
