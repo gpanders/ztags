@@ -73,10 +73,11 @@ sourcehut account by sending a [plain text email](https://useplaintext.email) to
 [~gpanders/ztags@todo.sr.ht](mailto://~gpanders/ztags@todo.sr.ht).
 
 [Send patches][git-send-email] to [~gpanders/ztags@lists.sr.ht][list] or open a
-pull request on [GitHub][github].
+pull request on [GitHub][github] or [Codeberg][codeberg].
 
 [list]: https://lists.sr.ht/~gpanders/ztags
 [github]: https://github.com/gpanders/ztags
+[codeberg]: https://codeberg.org/gpanders/ztags
 [tickets]: https://todo.sr.ht/~gpanders/ztags
 [git-send-email]: https://git-send-email.io/
 
