@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = "ztags",
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_cmd.step);
 
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -34,7 +34,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_unit_tests.step);
 
     const docs_cmd = b.addSystemCommand(&.{"scdoc"});
-    docs_cmd.setStdIn(.{ .lazy_path = .{ .path = "ztags.1.scd" } });
+    docs_cmd.setStdIn(.{ .lazy_path = b.path("ztags.1.scd") });
     const docs_out = docs_cmd.captureStdOut();
     const docs = b.addInstallFileWithDir(docs_out, .{
         .custom = b.pathJoin(&.{ "share", "man", "man1" }),

@@ -7,9 +7,9 @@ abstract syntax tree of the source code.
 
 ## Building
 
-Simply clone this repository and build with `zig build`. This will produce a
-`Debug` build by default, which generates useful error messages but can be a
-bit slow. To build a release build use
+Clone this repository and build with `zig build` (Only Zig 0.13 is supported).
+This will produce a `Debug` build by default, which generates useful error
+messages but can be a bit slow. To build a release build use
 
 ```console
 $ zig build -Doptimize=ReleaseSafe
@@ -30,9 +30,6 @@ use
 ```console
 $ zig build -Doptimize=ReleaseSafe -p $PREFIX install docs
 ```
-
-The `master` branch tracks Zig `HEAD`. Use the `0.11.0` branch if using a
-stable release.
 
 [scdoc]: https://sr.ht/~sircmpwn/scdoc/
 

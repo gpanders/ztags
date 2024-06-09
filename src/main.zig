@@ -62,7 +62,10 @@ pub fn main() anyerror!u8 {
         const content = try tags.write(allocator, options.relative);
         defer allocator.free(content);
 
-        try std.fs.cwd().writeFile(options.output, content);
+        try std.fs.cwd().writeFile(.{
+            .sub_path = options.output,
+            .data = content,
+        });
     }
 
     return 0;
