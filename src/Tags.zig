@@ -81,6 +81,11 @@ allocator: std.mem.Allocator,
 entries: EntryList,
 visited: std.StringHashMap(void),
 
+/// Static buffer for writing full paths.
+///
+/// Data in this buffer is duplicated when passed to findTags.
+var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
 pub fn init(allocator: std.mem.Allocator) Tags {
     return Tags{
         .allocator = allocator,
@@ -140,8 +145,6 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     var allocator = self.allocator;
     var ast = try std.zig.Ast.parse(allocator, source, .zig);
     defer ast.deinit(allocator);
-
-    var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
 
     const tags = ast.nodes.items(.tag);
     const tokens = ast.nodes.items(.main_token);
