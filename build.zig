@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const version: std.SemanticVersion = .{ .major = 0, .minor = 1, .patch = 0 };
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -10,6 +12,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    const options = b.addOptions();
+    options.addOption([]const u8, "name", exe.name);
+    options.addOption([]const u8, "version", b.fmt("{d}.{d}.{d}", .{
+        version.major,
+        version.minor,
+        version.patch,
+    }));
+
+    exe.root_module.addOptions("config", options);
 
     b.installArtifact(exe);
 
@@ -27,6 +39,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    unit_tests.root_module.addOptions("config", options);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 

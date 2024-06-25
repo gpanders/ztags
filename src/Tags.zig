@@ -664,8 +664,14 @@ test "Tags.findTags" {
         \\
     ;
 
-    try test_dir.writeFile("a.zig", a_src);
-    try test_dir.writeFile("b.zig", b_src);
+    try test_dir.writeFile(.{
+        .sub_path = "a.zig",
+        .data = a_src,
+    });
+    try test_dir.writeFile(.{
+        .sub_path = "b.zig",
+        .data = b_src,
+    });
 
     var tags = Tags.init(std.testing.allocator);
     defer tags.deinit();

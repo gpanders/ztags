@@ -14,9 +14,17 @@ pub fn main() anyerror!u8 {
     var allocator = base_allocator.allocator();
 
     var options = a: {
-        var rc: u8 = 0;
-        break :a Options.parse(allocator, &rc) catch |err| switch (err) {
-            error.InvalidOption, error.MissingArgument => return rc,
+        break :a Options.parse(allocator) catch |err| switch (err) {
+            // Showing help or version information should not return an error
+            // code
+            error.ShowHelp, error.ShowVersion => return 0,
+
+            // These are errors from our own arg parsing. These will print a
+            // user-friendly error message and set an error exit code
+            error.InvalidOption, error.MissingArgument => return 1,
+
+            // These are unexpected errors. In this case print the full error
+            // return trace
             else => return err,
         };
     };

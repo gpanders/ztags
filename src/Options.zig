@@ -1,4 +1,5 @@
 const std = @import("std");
+const config = @import("config");
 
 const Options = @This();
 
@@ -7,30 +8,46 @@ relative: bool = false,
 append: bool = false,
 arguments: []const []const u8 = undefined,
 
-const OptionField = std.meta.FieldEnum(Options);
+const Option = enum(u8) {
+    output = 'o',
+    relative = 'r',
+    append = 'a',
+    version = 'V',
+    help = 'h',
 
-fn getOption(opt: u8) ?OptionField {
-    return switch (opt) {
-        'a' => .append,
-        'o' => .output,
-        'r' => .relative,
-        else => null,
-    };
+    fn from(c: u8) ?Option {
+        inline for (@typeInfo(Option).Enum.fields) |field| {
+            if (field.value == c) {
+                return @enumFromInt(c);
+            }
+        }
+
+        return null;
+    }
+};
+
+fn usage() void {
+    std.io.getStdErr().writer().writeAll("Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n") catch {};
 }
 
-fn usage(exe: []const u8) void {
-    std.debug.print("Usage: {s} [-o OUTPUT] [-a] [-r] FILES...\n", .{exe});
-}
-
-pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
+pub fn parse(allocator: std.mem.Allocator) !Options {
     var it = try std.process.argsWithAllocator(allocator);
     defer it.deinit();
 
-    const exe = it.next();
+    _ = it.skip();
 
-    return parseIter(allocator, &it, rc) catch |err| {
+    var errmsg: ?[]const u8 = null;
+    return parseIter(allocator, &it, &errmsg) catch |err| {
+        if (errmsg) |e| {
+            std.io.getStdErr().writer().print("{s}: {s}\n", .{ config.name, e }) catch {};
+            allocator.free(e);
+        }
+
         switch (err) {
-            error.InvalidOption, error.MissingArgument => usage(exe orelse "ztags"),
+            error.ShowHelp, error.InvalidOption, error.MissingArgument => usage(),
+            error.ShowVersion => {
+                std.io.getStdErr().writeAll(config.name ++ " " ++ config.version ++ "\n") catch {};
+            },
             else => {},
         }
 
@@ -38,7 +55,7 @@ pub fn parse(allocator: std.mem.Allocator, rc: *u8) !Options {
     };
 }
 
-fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
+fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) !Options {
     var arguments = std.ArrayList([]const u8).init(allocator);
     errdefer {
         for (arguments.items) |arg| allocator.free(arg);
@@ -48,33 +65,39 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
     var options = Options{};
     errdefer if (options.output.len > 0) allocator.free(options.output);
 
-    var next_option: ?OptionField = null;
+    var next_option: ?Option = null;
     while (iter.next()) |arg| {
         if (next_option) |opt| {
             switch (opt) {
                 .output => options.output = try allocator.dupe(u8, arg),
+                // Unreachable: next_option is only ever set with the enum
+                // values above
                 else => unreachable,
             }
             next_option = null;
         } else if (std.mem.startsWith(u8, arg, "-")) {
             if (arg.len < 2) {
-                rc.* = 1;
                 return error.InvalidOption;
             } else for (arg[1..]) |c| {
-                if (next_option != null) {
-                    rc.* = 1;
+                if (next_option) |opt| {
+                    errmsg.* = try std.fmt.allocPrint(
+                        allocator,
+                        "Option '{c}' missing required argument.",
+                        .{@intFromEnum(opt)},
+                    );
                     return error.MissingArgument;
                 }
 
-                if (getOption(c)) |opt| {
+                if (Option.from(c)) |opt| {
                     switch (opt) {
                         .output => next_option = opt,
                         .relative => options.relative = true,
                         .append => options.append = true,
-                        else => unreachable,
+                        .help => return error.ShowHelp,
+                        .version => return error.ShowVersion,
                     }
                 } else {
-                    rc.* = if (c == 'h') 0 else 1;
+                    errmsg.* = try std.fmt.allocPrint(allocator, "Unexpected option: '{c}'.", .{c});
                     return error.InvalidOption;
                 }
             }
@@ -85,8 +108,12 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
         }
     }
 
-    if (next_option) |_| {
-        rc.* = 1;
+    if (next_option) |opt| {
+        errmsg.* = try std.fmt.allocPrint(
+            allocator,
+            "Option '{c}' missing required argument.",
+            .{@intFromEnum(opt)},
+        );
         return error.MissingArgument;
     }
 
@@ -95,11 +122,9 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, rc: *u8) !Options {
     }
 
     if (arguments.items.len == 0) {
-        rc.* = 1;
+        errmsg.* = try allocator.dupe(u8, "No files specified.");
         return error.MissingArgument;
     }
-
-    rc.* = 0;
 
     options.arguments = try arguments.toOwnedSlice();
     return options;
@@ -136,18 +161,23 @@ const TestIterator = struct {
 };
 
 test "parseIter" {
-    var rc: u8 = 0;
+    var errmsg: ?[]const u8 = null;
 
     {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // Default output value
         var it = TestIterator.init(&.{
             "hello.zig", "world.zig",
         });
 
-        var options = try Options.parseIter(std.testing.allocator, &it, &rc);
+        var options = try Options.parseIter(std.testing.allocator, &it, &errmsg);
         defer options.deinit(std.testing.allocator);
 
-        try std.testing.expectEqual(@as(u8, 0), rc);
+        try std.testing.expect(errmsg == null);
         try std.testing.expectEqualStrings("tags", options.output);
         try std.testing.expectEqual(false, options.relative);
         try std.testing.expectEqual(false, options.append);
@@ -157,64 +187,92 @@ test "parseIter" {
     }
 
     {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // Supplied output value
         var it = TestIterator.init(&.{
             "-o", "foo", "-r", "hello.zig",
         });
 
-        var options = try Options.parseIter(std.testing.allocator, &it, &rc);
+        var options = try Options.parseIter(std.testing.allocator, &it, &errmsg);
         defer options.deinit(std.testing.allocator);
 
-        try std.testing.expectEqual(@as(u8, 0), rc);
+        try std.testing.expect(errmsg == null);
         try std.testing.expectEqualStrings("foo", options.output);
         try std.testing.expectEqual(true, options.relative);
         try std.testing.expectEqual(false, options.append);
     }
 
     {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // error: Missing arguments
         var it = TestIterator.init(&.{
             "-o", "foo",
         });
 
-        const options = Options.parseIter(std.testing.allocator, &it, &rc);
-        try std.testing.expectEqual(@as(u8, 1), rc);
+        const options = Options.parseIter(std.testing.allocator, &it, &errmsg);
+        try std.testing.expect(errmsg != null);
         try std.testing.expectError(error.MissingArgument, options);
+        try std.testing.expectEqualStrings("No files specified.", errmsg.?);
     }
 
     {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // error: Missing option value
         var it = TestIterator.init(&.{
             "hello.zig", "-o",
         });
 
-        const options = Options.parseIter(std.testing.allocator, &it, &rc);
-        try std.testing.expectEqual(@as(u8, 1), rc);
+        const options = Options.parseIter(std.testing.allocator, &it, &errmsg);
         try std.testing.expectError(error.MissingArgument, options);
+        try std.testing.expect(errmsg != null);
+        try std.testing.expectEqualStrings("Option 'o' missing required argument.", errmsg.?);
     }
 
     {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // Multiple options
         var it = TestIterator.init(&.{
             "-rao", "tags", "hello.zig",
         });
 
-        var options = try Options.parseIter(std.testing.allocator, &it, &rc);
+        var options = try Options.parseIter(std.testing.allocator, &it, &errmsg);
         defer options.deinit(std.testing.allocator);
 
-        try std.testing.expectEqual(@as(u8, 0), rc);
+        try std.testing.expect(errmsg == null);
         try std.testing.expectEqual(true, options.relative);
         try std.testing.expectEqual(true, options.append);
     }
 
     {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // error: Option after option that expects argument
         var it = TestIterator.init(&.{
             "-roa", "tags", "hello.zig",
         });
 
-        const options = Options.parseIter(std.testing.allocator, &it, &rc);
-        try std.testing.expectEqual(@as(u8, 1), rc);
+        const options = Options.parseIter(std.testing.allocator, &it, &errmsg);
         try std.testing.expectError(error.MissingArgument, options);
+        try std.testing.expect(errmsg != null);
+        try std.testing.expectEqualStrings("Option 'o' missing required argument.", errmsg.?);
     }
 }
