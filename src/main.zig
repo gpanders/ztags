@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const config = @import("config");
 
 const Options = @import("Options.zig");
 const Tags = @import("Tags.zig");
@@ -37,15 +38,24 @@ pub fn main() anyerror!u8 {
         const full_fname = if (std.fs.path.isAbsolute(fname))
             try allocator.dupe(u8, fname)
         else
-            try std.fs.cwd().realpathAlloc(allocator, fname);
+            std.fs.cwd().realpathAlloc(allocator, fname) catch |err| switch (err) {
+                error.FileNotFound => {
+                    std.io.getStdErr().writer().print(
+                        "{s}: Cannot open {s}: File not found.\n",
+                        .{ config.name, fname },
+                    ) catch {};
+                    return 22; // EINVAL
+                },
+                else => return err,
+            };
         defer allocator.free(full_fname);
 
         tags.findTags(full_fname) catch |err| switch (err) {
-            error.NotFile => {
-                try std.io.getStdErr().writer().print(
-                    "Error: {s} is a directory. Arguments must be Zig source files.\n",
-                    .{full_fname},
-                );
+            error.IsDir => {
+                std.io.getStdErr().writer().print(
+                    "{s}: {s} is a directory. Arguments must be Zig source files.\n",
+                    .{ config.name, full_fname },
+                ) catch {};
                 return 22; // EINVAL
             },
             else => return err,

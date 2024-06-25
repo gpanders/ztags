@@ -114,7 +114,7 @@ fn readFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
     }
 
     if (metadata.kind() == .directory) {
-        return error.NotFile;
+        return error.IsDir;
     }
 
     var array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
