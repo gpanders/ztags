@@ -67,18 +67,8 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
 
     var next_option: ?Option = null;
     while (iter.next()) |arg| {
-        if (next_option) |opt| {
-            switch (opt) {
-                .output => options.output = try allocator.dupe(u8, arg),
-                // Unreachable: next_option is only ever set with the enum
-                // values above
-                else => unreachable,
-            }
-            next_option = null;
-        } else if (std.mem.startsWith(u8, arg, "-")) {
-            if (arg.len < 2) {
-                return error.InvalidOption;
-            } else for (arg[1..]) |c| {
+        if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
+            for (arg[1..]) |c| {
                 if (next_option) |opt| {
                     errmsg.* = try std.fmt.allocPrint(
                         allocator,
@@ -101,6 +91,14 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
                     return error.InvalidOption;
                 }
             }
+        } else if (next_option) |opt| {
+            switch (opt) {
+                .output => options.output = try allocator.dupe(u8, arg),
+                // Unreachable: next_option is only ever set with the enum
+                // values above
+                else => unreachable,
+            }
+            next_option = null;
         } else {
             const a = try allocator.dupe(u8, arg);
             errdefer allocator.free(a);
@@ -212,6 +210,24 @@ test "parseIter" {
             errmsg = null;
         };
 
+        // Can output to stdout
+        var it = TestIterator.init(&.{
+            "-o", "-", "hello.zig",
+        });
+
+        var options = try Options.parseIter(std.testing.allocator, &it, &errmsg);
+        defer options.deinit(std.testing.allocator);
+
+        try std.testing.expect(errmsg == null);
+        try std.testing.expectEqualStrings("-", options.output);
+    }
+
+    {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
         // error: Missing arguments
         var it = TestIterator.init(&.{
             "-o", "foo",
@@ -232,6 +248,23 @@ test "parseIter" {
         // error: Missing option value
         var it = TestIterator.init(&.{
             "hello.zig", "-o",
+        });
+
+        const options = Options.parseIter(std.testing.allocator, &it, &errmsg);
+        try std.testing.expectError(error.MissingArgument, options);
+        try std.testing.expect(errmsg != null);
+        try std.testing.expectEqualStrings("Option 'o' missing required argument.", errmsg.?);
+    }
+
+    {
+        defer if (errmsg) |e| {
+            std.testing.allocator.free(e);
+            errmsg = null;
+        };
+
+        // error: Missing option value
+        var it = TestIterator.init(&.{
+            "-o", "-a", "hello.zig",
         });
 
         const options = Options.parseIter(std.testing.allocator, &it, &errmsg);
