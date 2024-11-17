@@ -7,6 +7,8 @@ secrets:
     - deca56bc-45c7-46a3-b258-47d0809bf65d # ssh key for mirroring
 environment:
     GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=no
+sources:
+    - https://git.sr.ht/~gpanders/ztags
 triggers:
     - action: email
       condition: failure
