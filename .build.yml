@@ -2,11 +2,19 @@ image: alpine/edge
 packages:
     - git
     - scdoc
+    - zig
 secrets:
     - deca56bc-45c7-46a3-b258-47d0809bf65d # ssh key for mirroring
 environment:
     GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=no
+triggers:
+    - action: email
+      condition: failure
+      to: Gregory Anders <greg@gpanders.com>
 tasks:
+    - test: |
+        cd ztags
+        zig build test
     - docs: |
         # Make sure there are no errors in the man page source
         scdoc < ztags/ztags.1.scd >/dev/null
