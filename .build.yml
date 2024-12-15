@@ -3,8 +3,6 @@ packages:
     - git
     - scdoc
     - zig
-secrets:
-    - deca56bc-45c7-46a3-b258-47d0809bf65d # ssh key for mirroring
 environment:
     GIT_SSH_COMMAND: ssh -o StrictHostKeyChecking=no
 sources:
@@ -20,12 +18,3 @@ tasks:
     - docs: |
         # Make sure there are no errors in the man page source
         scdoc < ztags/ztags.1.scd >/dev/null
-    - mirror: |
-        # Don't run on GitHub PRs
-        if [ "$BUILD_REASON" = 'github-pr' ]; then
-            exit
-        fi
-
-        git clone --mirror https://git.sr.ht/~gpanders/ztags ztags.git
-        git -C ztags.git push --force --mirror git@github.com:gpanders/ztags
-        git -C ztags.git push --force --mirror git@codeberg.org:gpanders/ztags
