@@ -62,21 +62,11 @@ The following "kinds" are supported:
 
 ## Contributing
 
-Have a question, comment, or feature request? Send an email to the [mailing
-list][list].
+Bugs can be reported on the [issue tracker][issues]. PRs are accepted on [GitHub][github] or [Codeberg][codeberg].
 
-Report bugs on the [ticket tracker][tickets]. You can file a ticket without a
-sourcehut account by sending a [plain text email](https://useplaintext.email) to
-[~gpanders/ztags@todo.sr.ht](mailto://~gpanders/ztags@todo.sr.ht).
-
-[Send patches][git-send-email] to [~gpanders/ztags@lists.sr.ht][list] or open a
-pull request on [GitHub][github] or [Codeberg][codeberg].
-
-[list]: https://lists.sr.ht/~gpanders/ztags
+[issues]: https://codeberg.org/gpanders/ztags/issues
 [github]: https://github.com/gpanders/ztags
 [codeberg]: https://codeberg.org/gpanders/ztags
-[tickets]: https://todo.sr.ht/~gpanders/ztags
-[git-send-email]: https://git-send-email.io/
 
 
 ## License
