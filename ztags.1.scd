@@ -54,7 +54,7 @@ and include all tags in the same file:
 
 # CONTRIBUTE
 
-Report bugs and send patches to the mailing list ~gpanders/ztags@lists.sr.ht.
+Report bugs or open pull requests at https://codeberg.org/gpanders/ztags.
 
 # AUTHOR
 
