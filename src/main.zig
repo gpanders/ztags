@@ -5,6 +5,14 @@ const config = @import("config");
 const Options = @import("Options.zig");
 const Tags = @import("Tags.zig");
 
+fn printStderr(comptime fmt: []const u8, args: anytype) void {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    stderr.print(fmt, args) catch return;
+    stderr.flush() catch {};
+}
+
 pub fn main() anyerror!u8 {
     var base_allocator = switch (builtin.mode) {
         .Debug => std.heap.GeneralPurposeAllocator(.{}){},
@@ -40,10 +48,10 @@ pub fn main() anyerror!u8 {
         else
             std.fs.cwd().realpathAlloc(allocator, fname) catch |err| switch (err) {
                 error.FileNotFound => {
-                    std.fs.File.stderr().deprecatedWriter().print(
+                    printStderr(
                         "{s}: Cannot open {s}: File not found.\n",
                         .{ config.name, fname },
-                    ) catch {};
+                    );
                     return 22; // EINVAL
                 },
                 else => return err,
@@ -52,10 +60,10 @@ pub fn main() anyerror!u8 {
 
         tags.findTags(full_fname) catch |err| switch (err) {
             error.IsDir => {
-                std.fs.File.stderr().deprecatedWriter().print(
+                printStderr(
                     "{s}: {s} is a directory. Arguments must be Zig source files.\n",
                     .{ config.name, full_fname },
-                ) catch {};
+                );
                 return 22; // EINVAL
             },
             else => return err,
@@ -63,9 +71,11 @@ pub fn main() anyerror!u8 {
     }
 
     if (std.mem.eql(u8, options.output, "-")) {
-        const content = try tags.write(allocator, options.relative);
-        defer allocator.free(content);
-        try std.fs.File.stdout().writeAll(content);
+        var stdout_buffer: [4096]u8 = undefined;
+        var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+        const stdout = &stdout_writer.interface;
+        try tags.write(stdout, options.relative);
+        try stdout.flush();
     } else {
         if (options.append) {
             if (std.fs.cwd().readFileAlloc(allocator, options.output, std.math.maxInt(u32))) |contents| {
@@ -77,12 +87,17 @@ pub fn main() anyerror!u8 {
             }
         }
 
-        const content = try tags.write(allocator, options.relative);
-        defer allocator.free(content);
+        var contents = std.Io.Writer.Allocating.init(allocator);
+        defer contents.deinit();
+
+        try tags.write(&contents.writer, options.relative);
+
+        const data = try contents.toOwnedSlice();
+        defer allocator.free(data);
 
         try std.fs.cwd().writeFile(.{
             .sub_path = options.output,
-            .data = content,
+            .data = data,
         });
     }
 

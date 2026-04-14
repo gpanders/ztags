@@ -2,7 +2,7 @@ const std = @import("std");
 
 const Tags = @This();
 
-const EntryList = std.ArrayListUnmanaged(Entry);
+const EntryList = std.ArrayList(Entry);
 
 const Kind = enum {
     function,
@@ -89,7 +89,7 @@ var path_buf: [std.fs.max_path_bytes]u8 = undefined;
 pub fn init(allocator: std.mem.Allocator) Tags {
     return Tags{
         .allocator = allocator,
-        .entries = .{},
+        .entries = .empty,
         .visited = std.StringHashMap(void).init(allocator),
     };
 }
@@ -122,10 +122,13 @@ fn readFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
         return error.IsDir;
     }
 
-    var array_list = try std.array_list.Managed(u8).initCapacity(allocator, size + 1);
-    defer array_list.deinit();
-    try file.deprecatedReader().readAllArrayList(&array_list, size + 1);
-    return try array_list.toOwnedSliceSentinel(0);
+    var read_buffer: [4096]u8 = undefined;
+    var reader = file.reader(&read_buffer);
+
+    var source = try std.Io.Writer.Allocating.initCapacity(allocator, size + 1);
+    errdefer source.deinit();
+    _ = try reader.interface.streamRemaining(&source.writer);
+    return try source.toOwnedSliceSentinel(0);
 }
 
 fn parseName(name: []const u8) ?[]const u8 {
@@ -180,7 +183,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     const source = try readFile(self.allocator, fname_) orelse return;
     defer self.allocator.free(source);
 
-    var allocator = self.allocator;
+    const allocator = self.allocator;
     var ast = try std.zig.Ast.parse(allocator, source, .zig);
     defer ast.deinit(allocator);
 
@@ -353,12 +356,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
     }
 }
 
-pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const u8 {
-    var contents = std.array_list.Managed(u8).init(allocator);
-    defer contents.deinit();
-
-    var writer = contents.writer();
-
+pub fn write(self: *Tags, writer: *std.Io.Writer, relative: bool) !void {
     try writer.writeAll(
         "!_TAG_FILE_SORTED\t1\t/1 = sorted/\n" ++
             "!_TAG_FILE_ENCODING\tutf-8\n",
@@ -367,29 +365,29 @@ pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const
     try removeDuplicates(self.allocator, &self.entries);
 
     const cwd = if (relative)
-        try std.fs.realpathAlloc(allocator, ".")
+        try std.fs.realpathAlloc(self.allocator, ".")
     else
         null;
-    defer if (cwd) |c| allocator.free(c);
+    defer if (cwd) |c| self.allocator.free(c);
 
     // Cache relative paths to avoid recalculating for the same absolute path. If the relative paths
     // option is not enabled this has no cost other than some stack space and a couple of no-op
     // function calls
-    var relative_paths = std.StringHashMap([]const u8).init(allocator);
+    var relative_paths = std.StringHashMap([]const u8).init(self.allocator);
     defer {
         var it = relative_paths.valueIterator();
-        while (it.next()) |val| allocator.free(val.*);
+        while (it.next()) |val| self.allocator.free(val.*);
         relative_paths.deinit();
     }
 
     for (self.entries.items) |entry| {
-        const escaped = try escape(allocator, entry.text);
-        defer escaped.deinit(allocator);
+        const escaped = try escape(self.allocator, entry.text);
+        defer escaped.deinit(self.allocator);
 
         const filename = if (cwd) |c| filename: {
             const gop = try relative_paths.getOrPut(entry.filename);
             if (!gop.found_existing) {
-                gop.value_ptr.* = try std.fs.path.relative(allocator, c, entry.filename);
+                gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, entry.filename);
             }
 
             break :filename gop.value_ptr.*;
@@ -402,8 +400,13 @@ pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const
             @tagName(entry.kind),
         });
     }
+}
 
-    return try contents.toOwnedSlice();
+fn writeAlloc(tags: *Tags, allocator: std.mem.Allocator, relative: bool) ![]u8 {
+    var output = std.Io.Writer.Allocating.init(allocator);
+    errdefer output.deinit();
+    try tags.write(&output.writer, relative);
+    return try output.toOwnedSlice();
 }
 
 /// Remove duplicates from an EntryList in place. Invalidates pointers.
@@ -426,8 +429,8 @@ fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !void {
         }
     }.lessThan);
 
-    var deduplicated_entries = try std.array_list.Managed(Entry).initCapacity(allocator, orig.items.len);
-    defer deduplicated_entries.deinit();
+    var deduplicated_entries = try EntryList.initCapacity(allocator, orig.items.len);
+    errdefer deduplicated_entries.deinit(allocator);
 
     var last_unique: usize = 0;
     for (orig.items, 0..) |entry, i| {
@@ -439,8 +442,8 @@ fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !void {
         }
     }
 
-    allocator.free(orig.allocatedSlice());
-    orig.* = deduplicated_entries.moveToUnmanaged();
+    orig.deinit(allocator);
+    orig.* = deduplicated_entries;
 }
 
 test "removeDuplicates" {
@@ -702,7 +705,7 @@ test "Tags.findTags" {
     try test_dir.setAsCwd();
     defer cwd.setAsCwd() catch unreachable;
 
-    const actual = try tags.write(std.testing.allocator, true);
+    const actual = try writeAlloc(&tags, std.testing.allocator, true);
     defer std.testing.allocator.free(actual);
 
     const golden =
@@ -766,7 +769,7 @@ test "Tags.findTags skips import aliases and same-name field aliases" {
     defer std.testing.allocator.free(full_path);
     try tags.findTags(full_path);
 
-    const actual = try tags.write(std.testing.allocator, true);
+    const actual = try writeAlloc(&tags, std.testing.allocator, true);
     defer std.testing.allocator.free(actual);
 
     try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "imported\ttest-alias-filter/root.zig\t/"));
@@ -798,7 +801,7 @@ test "Tags.read" {
     defer tags.deinit();
 
     try tags.read(input);
-    const output = try tags.write(std.testing.allocator, true);
+    const output = try writeAlloc(&tags, std.testing.allocator, true);
     defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings(input, output);

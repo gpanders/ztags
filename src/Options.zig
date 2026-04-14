@@ -3,6 +3,14 @@ const config = @import("config");
 
 const Options = @This();
 
+fn printStderr(comptime fmt: []const u8, args: anytype) void {
+    var stderr_buffer: [1024]u8 = undefined;
+    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    const stderr = &stderr_writer.interface;
+    stderr.print(fmt, args) catch return;
+    stderr.flush() catch {};
+}
+
 output: []const u8 = "",
 relative: bool = false,
 append: bool = false,
@@ -27,7 +35,7 @@ const Option = enum(u8) {
 };
 
 fn usage() void {
-    std.fs.File.stderr().writeAll("Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n") catch {};
+    printStderr("{s}", .{"Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n"});
 }
 
 pub fn parse(allocator: std.mem.Allocator) !Options {
@@ -39,14 +47,14 @@ pub fn parse(allocator: std.mem.Allocator) !Options {
     var errmsg: ?[]const u8 = null;
     return parseIter(allocator, &it, &errmsg) catch |err| {
         if (errmsg) |e| {
-            std.fs.File.stderr().deprecatedWriter().print("{s}: {s}\n", .{ config.name, e }) catch {};
+            printStderr("{s}: {s}\n", .{ config.name, e });
             allocator.free(e);
         }
 
         switch (err) {
             error.ShowHelp, error.InvalidOption, error.MissingArgument => usage(),
             error.ShowVersion => {
-                std.fs.File.stderr().writeAll(config.name ++ " " ++ config.version ++ "\n") catch {};
+                printStderr("{s} {s}\n", .{ config.name, config.version });
             },
             else => {},
         }
@@ -56,10 +64,10 @@ pub fn parse(allocator: std.mem.Allocator) !Options {
 }
 
 fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) !Options {
-    var arguments = std.array_list.Managed([]const u8).init(allocator);
+    var arguments: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (arguments.items) |arg| allocator.free(arg);
-        arguments.deinit();
+        arguments.deinit(allocator);
     }
 
     var options = Options{};
@@ -102,7 +110,7 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
         } else {
             const a = try allocator.dupe(u8, arg);
             errdefer allocator.free(a);
-            try arguments.append(a);
+            try arguments.append(allocator, a);
         }
     }
 
@@ -124,7 +132,7 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
         return error.MissingArgument;
     }
 
-    options.arguments = try arguments.toOwnedSlice();
+    options.arguments = try arguments.toOwnedSlice(allocator);
     return options;
 }
 
