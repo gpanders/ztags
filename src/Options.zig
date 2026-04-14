@@ -16,7 +16,7 @@ const Option = enum(u8) {
     help = 'h',
 
     fn from(c: u8) ?Option {
-        inline for (@typeInfo(Option).Enum.fields) |field| {
+        inline for (std.meta.fields(Option)) |field| {
             if (field.value == c) {
                 return @enumFromInt(c);
             }
@@ -27,7 +27,7 @@ const Option = enum(u8) {
 };
 
 fn usage() void {
-    std.io.getStdErr().writer().writeAll("Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n") catch {};
+    std.fs.File.stderr().writeAll("Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n") catch {};
 }
 
 pub fn parse(allocator: std.mem.Allocator) !Options {
@@ -39,14 +39,14 @@ pub fn parse(allocator: std.mem.Allocator) !Options {
     var errmsg: ?[]const u8 = null;
     return parseIter(allocator, &it, &errmsg) catch |err| {
         if (errmsg) |e| {
-            std.io.getStdErr().writer().print("{s}: {s}\n", .{ config.name, e }) catch {};
+            std.fs.File.stderr().deprecatedWriter().print("{s}: {s}\n", .{ config.name, e }) catch {};
             allocator.free(e);
         }
 
         switch (err) {
             error.ShowHelp, error.InvalidOption, error.MissingArgument => usage(),
             error.ShowVersion => {
-                std.io.getStdErr().writeAll(config.name ++ " " ++ config.version ++ "\n") catch {};
+                std.fs.File.stderr().writeAll(config.name ++ " " ++ config.version ++ "\n") catch {};
             },
             else => {},
         }
@@ -56,7 +56,7 @@ pub fn parse(allocator: std.mem.Allocator) !Options {
 }
 
 fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) !Options {
-    var arguments = std.ArrayList([]const u8).init(allocator);
+    var arguments = std.array_list.Managed([]const u8).init(allocator);
     errdefer {
         for (arguments.items) |arg| allocator.free(arg);
         arguments.deinit();

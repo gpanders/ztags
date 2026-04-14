@@ -40,7 +40,7 @@ pub fn main() anyerror!u8 {
         else
             std.fs.cwd().realpathAlloc(allocator, fname) catch |err| switch (err) {
                 error.FileNotFound => {
-                    std.io.getStdErr().writer().print(
+                    std.fs.File.stderr().deprecatedWriter().print(
                         "{s}: Cannot open {s}: File not found.\n",
                         .{ config.name, fname },
                     ) catch {};
@@ -52,7 +52,7 @@ pub fn main() anyerror!u8 {
 
         tags.findTags(full_fname) catch |err| switch (err) {
             error.IsDir => {
-                std.io.getStdErr().writer().print(
+                std.fs.File.stderr().deprecatedWriter().print(
                     "{s}: {s} is a directory. Arguments must be Zig source files.\n",
                     .{ config.name, full_fname },
                 ) catch {};
@@ -65,7 +65,7 @@ pub fn main() anyerror!u8 {
     if (std.mem.eql(u8, options.output, "-")) {
         const content = try tags.write(allocator, options.relative);
         defer allocator.free(content);
-        try std.io.getStdOut().writeAll(content);
+        try std.fs.File.stdout().writeAll(content);
     } else {
         if (options.append) {
             if (std.fs.cwd().readFileAlloc(allocator, options.output, std.math.maxInt(u32))) |contents| {

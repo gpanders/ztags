@@ -33,7 +33,7 @@ const Kind = enum {
     }
 
     test "Kind.parse" {
-        inline for (@typeInfo(Kind).Enum.fields) |field| {
+        inline for (std.meta.fields(Kind)) |field| {
             const parsed = Kind.parse(field.name) orelse {
                 std.debug.print("Kind variant \"{s}\" missing in Kind.parse()\n", .{field.name});
                 return error.MissingParseVariant;
@@ -84,7 +84,7 @@ visited: std.StringHashMap(void),
 /// Static buffer for writing full paths.
 ///
 /// Data in this buffer is duplicated when passed to findTags.
-var path_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+var path_buf: [std.fs.max_path_bytes]u8 = undefined;
 
 pub fn init(allocator: std.mem.Allocator) Tags {
     return Tags{
@@ -112,20 +112,58 @@ fn readFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
     const file = try std.fs.cwd().openFile(fname, .{});
     defer file.close();
 
-    const metadata = try file.metadata();
-    const size = metadata.size();
+    const metadata = try file.stat();
+    const size = metadata.size;
     if (size == 0) {
         return null;
     }
 
-    if (metadata.kind() == .directory) {
+    if (metadata.kind == .directory) {
         return error.IsDir;
     }
 
-    var array_list = try std.ArrayList(u8).initCapacity(allocator, size + 1);
+    var array_list = try std.array_list.Managed(u8).initCapacity(allocator, size + 1);
     defer array_list.deinit();
-    try file.reader().readAllArrayList(&array_list, size + 1);
+    try file.deprecatedReader().readAllArrayList(&array_list, size + 1);
     return try array_list.toOwnedSliceSentinel(0);
+}
+
+fn parseName(name: []const u8) ?[]const u8 {
+    if (std.mem.eql(u8, name, "_")) {
+        return null;
+    }
+
+    return if (std.mem.startsWith(u8, name, "@\""))
+        std.mem.trim(u8, name[1..], "\"")
+    else
+        name;
+}
+
+fn importPath(tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ?[]const u8 {
+    if (!std.mem.eql(u8, tree.tokenSlice(tree.nodeMainToken(node)), "@import")) {
+        return null;
+    }
+
+    var params_buf: [2]std.zig.Ast.Node.Index = undefined;
+    const params = tree.builtinCallParams(&params_buf, node) orelse return null;
+    if (params.len != 1) {
+        return null;
+    }
+
+    return std.mem.trim(u8, tree.tokenSlice(tree.firstToken(params[0])), "\"");
+}
+
+fn containerKind(tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ?Kind {
+    var buffer: [2]std.zig.Ast.Node.Index = undefined;
+    const container = tree.fullContainerDecl(&buffer, node) orelse return null;
+    const container_type = tree.tokenSlice(container.ast.main_token);
+
+    return switch (container_type[0]) {
+        's' => .@"struct",
+        'e' => .@"enum",
+        'u' => .@"union",
+        else => null,
+    };
 }
 
 pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
@@ -147,18 +185,18 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     defer ast.deinit(allocator);
 
     const tags = ast.nodes.items(.tag);
-    const tokens = ast.nodes.items(.main_token);
-    const datas = ast.nodes.items(.data);
-    for (tags, tokens, datas, 0..) |tag, token, data, i| {
+    for (tags, 0..) |tag, i| {
+        const node: std.zig.Ast.Node.Index = @enumFromInt(i);
         var ident: ?[]const u8 = null;
         var kind: ?Kind = null;
 
         switch (tag) {
-            .builtin_call_two => {
-                const builtin = ast.tokenSlice(token);
-                if (std.mem.eql(u8, builtin[1..], "import")) {
-                    const name_index = tokens[data.lhs];
-                    const name = std.mem.trim(u8, ast.tokenSlice(name_index), "\"");
+            .builtin_call,
+            .builtin_call_comma,
+            .builtin_call_two,
+            .builtin_call_two_comma,
+            => {
+                if (importPath(ast, node)) |name| {
                     if (std.mem.endsWith(u8, name, ".zig")) {
                         const dir = std.fs.path.dirname(fname_) orelse continue;
                         const import_fname = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{
@@ -178,7 +216,10 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                 continue;
             },
             .fn_decl => {
-                ident = ast.tokenSlice(token + 1);
+                var buffer: [1]std.zig.Ast.Node.Index = undefined;
+                const fn_proto = ast.fullFnProto(&buffer, node) orelse continue;
+                const name_token = fn_proto.name_token orelse continue;
+                ident = ast.tokenSlice(name_token);
                 kind = .function;
             },
             .global_var_decl,
@@ -186,76 +227,51 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
             .local_var_decl,
             .aligned_var_decl,
             => {
-                var name = ast.tokenSlice(token + 1);
-                if (std.mem.eql(u8, name, "_")) {
-                    continue;
-                }
-                if (std.mem.startsWith(u8, name, "@\"")) {
-                    name = std.mem.trim(u8, name[1..], "\"");
-                }
+                const var_decl = ast.fullVarDecl(node) orelse continue;
+                const name = parseName(ast.tokenSlice(var_decl.ast.mut_token + 1)) orelse continue;
 
                 ident = name;
-                kind = if (std.mem.eql(u8, ast.tokenSlice(token), "const"))
+                kind = if (std.mem.eql(u8, ast.tokenSlice(var_decl.ast.mut_token), "const"))
                     .constant
                 else
                     .variable;
 
-                switch (data.rhs) {
-                    0 => {},
-                    else => |rhs| switch (tags[rhs]) {
-                        .container_decl,
-                        .container_decl_trailing,
-                        .container_decl_two,
-                        .container_decl_two_trailing,
-                        .container_decl_arg,
-                        .container_decl_arg_trailing,
-                        => {
-                            const container_type = ast.tokenSlice(tokens[rhs]);
-                            kind = switch (container_type[0]) {
-                                's' => .@"struct",
-                                'e' => .@"enum",
-                                'u' => .@"union",
-                                else => continue,
-                            };
-                        },
-                        .tagged_union,
-                        .tagged_union_trailing,
-                        .tagged_union_two,
-                        .tagged_union_two_trailing,
-                        .tagged_union_enum_tag,
-                        .tagged_union_enum_tag_trailing,
-                        => kind = .@"union",
-                        .builtin_call_two => if (std.mem.eql(u8, ast.tokenSlice(tokens[rhs]), "@import")) {
-                            // Ignore variables of the form
-                            //   const foo = @import("foo");
-                            // Having these as tags is generally not useful and creates a lot of
-                            // redundant noise
-                            continue;
-                        },
-                        .field_access => {
-                            // Ignore variables of the form
-                            //      const foo = SomeContainer.foo
-                            // i.e. when the name of the variable is just an alias to some field
-                            const identifier_token = ast.tokenSlice(datas[rhs].rhs);
-                            if (std.mem.eql(u8, identifier_token, name)) {
+                if (var_decl.ast.init_node.unwrap()) |rhs| {
+                    if (containerKind(ast, rhs)) |container_kind| {
+                        kind = container_kind;
+                    } else {
+                        switch (ast.nodeTag(rhs)) {
+                            .builtin_call,
+                            .builtin_call_comma,
+                            .builtin_call_two,
+                            .builtin_call_two_comma,
+                            => if (importPath(ast, rhs) != null) {
+                                // Ignore variables of the form
+                                //   const foo = @import("foo");
+                                // Having these as tags is generally not useful and creates a lot of
+                                // redundant noise
                                 continue;
-                            }
-                        },
-                        else => {},
-                    },
+                            },
+                            .field_access => {
+                                // Ignore variables of the form
+                                //      const foo = SomeContainer.foo
+                                // i.e. when the name of the variable is just an alias to some field
+                                const identifier_token = ast.tokenSlice(ast.nodeData(rhs).node_and_token[1]);
+                                if (std.mem.eql(u8, identifier_token, name)) {
+                                    continue;
+                                }
+                            },
+                            else => {},
+                        }
+                    }
                 }
             },
             .container_field_init,
             .container_field_align,
             .container_field,
             => {
-                var name = ast.tokenSlice(token);
-                if (std.mem.eql(u8, name, "_")) {
-                    continue;
-                }
-                if (std.mem.startsWith(u8, name, "@\"")) {
-                    name = std.mem.trim(u8, name[1..], "\"");
-                }
+                const field = ast.fullContainerField(node) orelse continue;
+                const name = parseName(ast.tokenSlice(field.ast.main_token)) orelse continue;
                 ident = name;
                 kind = .field;
             },
@@ -266,7 +282,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
             .ident = try allocator.dupe(u8, ident.?),
             .filename = fname_,
             .kind = kind.?,
-            .text = try getNodeText(allocator, ast, @intCast(i)),
+            .text = try getNodeText(allocator, ast, node),
         });
     }
 }
@@ -285,7 +301,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
         var kind: ?Kind = null;
 
         var i: usize = 0;
-        var fields = std.mem.tokenize(u8, line, "\t");
+        var fields = std.mem.tokenizeScalar(u8, line, '\t');
         while (fields.next()) |field| : (i += 1) {
             switch (i) {
                 0 => ident = field,
@@ -338,15 +354,14 @@ pub fn read(self: *Tags, data: []const u8) !void {
 }
 
 pub fn write(self: *Tags, allocator: std.mem.Allocator, relative: bool) ![]const u8 {
-    var contents = std.ArrayList(u8).init(allocator);
+    var contents = std.array_list.Managed(u8).init(allocator);
     defer contents.deinit();
 
     var writer = contents.writer();
 
     try writer.writeAll(
-        \\!_TAG_FILE_SORTED	1	/1 = sorted/
-        \\!_TAG_FILE_ENCODING	utf-8
-        \\
+        "!_TAG_FILE_SORTED\t1\t/1 = sorted/\n" ++
+            "!_TAG_FILE_ENCODING\tutf-8\n",
     );
 
     try removeDuplicates(self.allocator, &self.entries);
@@ -411,7 +426,7 @@ fn removeDuplicates(allocator: std.mem.Allocator, orig: *EntryList) !void {
         }
     }.lessThan);
 
-    var deduplicated_entries = try std.ArrayList(Entry).initCapacity(allocator, orig.items.len);
+    var deduplicated_entries = try std.array_list.Managed(Entry).initCapacity(allocator, orig.items.len);
     defer deduplicated_entries.deinit();
 
     var last_unique: usize = 0;
@@ -691,48 +706,93 @@ test "Tags.findTags" {
     defer std.testing.allocator.free(actual);
 
     const golden =
-        \\!_TAG_FILE_SORTED	1	/1 = sorted/
-        \\!_TAG_FILE_ENCODING	utf-8
-        \\MyEnum	a.zig	/^const MyEnum = enum {$/;"	enum
-        \\MyStruct	a.zig	/^const MyStruct = struct {$/;"	struct
-        \\MyUnion	a.zig	/^const MyUnion = union(enum) {$/;"	union
-        \\a	a.zig	/a/;"	field
-        \\anotherFunction	b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
-        \\b	a.zig	/b/;"	field
-        \\c	a.zig	/c: u8/;"	field
-        \\d	a.zig	/d: u8/;"	field
-        \\e	a.zig	/e: void/;"	field
-        \\f	a.zig	/f: u32/;"	field
-        \\myFunction	a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
-        \\x	a.zig	/const x = switch (e) {$/;"	constant
-        \\y	a.zig	/const y = switch (u) {$/;"	constant
-        \\y	b.zig	/var y = x + 1/;"	variable
-        \\
-    ;
+        "!_TAG_FILE_SORTED\t1\t/1 = sorted/\n" ++
+        "!_TAG_FILE_ENCODING\tutf-8\n" ++
+        "MyEnum\ta.zig\t/^const MyEnum = enum {$/;\"\tenum\n" ++
+        "MyStruct\ta.zig\t/^const MyStruct = struct {$/;\"\tstruct\n" ++
+        "MyUnion\ta.zig\t/^const MyUnion = union(enum) {$/;\"\tunion\n" ++
+        "a\ta.zig\t/a/;\"\tfield\n" ++
+        "anotherFunction\tb.zig\t/fn anotherFunction(x: u8) u8 {$/;\"\tfunction\n" ++
+        "b\ta.zig\t/b/;\"\tfield\n" ++
+        "c\ta.zig\t/c: u8/;\"\tfield\n" ++
+        "d\ta.zig\t/d: u8/;\"\tfield\n" ++
+        "e\ta.zig\t/e: void/;\"\tfield\n" ++
+        "f\ta.zig\t/f: u32/;\"\tfield\n" ++
+        "myFunction\ta.zig\t/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;\"\tfunction\n" ++
+        "x\ta.zig\t/const x = switch (e) {$/;\"\tconstant\n" ++
+        "y\ta.zig\t/const y = switch (u) {$/;\"\tconstant\n" ++
+        "y\tb.zig\t/var y = x + 1/;\"\tvariable\n";
 
     try std.testing.expectEqualStrings(golden, actual);
 }
 
-test "Tags.read" {
-    const input =
-        \\!_TAG_FILE_SORTED	1	/1 = sorted/
-        \\!_TAG_FILE_ENCODING	utf-8
-        \\MyEnum	a.zig	/^const MyEnum = enum {$/;"	enum
-        \\MyStruct	a.zig	/^const MyStruct = struct {$/;"	struct
-        \\MyUnion	a.zig	/^const MyUnion = union(enum) {$/;"	union
-        \\a	a.zig	/a/;"	field
-        \\anotherFunction	b.zig	/fn anotherFunction(x: u8) u8 {$/;"	function
-        \\b	a.zig	/b/;"	field
-        \\c	a.zig	/c: u8/;"	field
-        \\d	a.zig	/d: u8/;"	field
-        \\e	a.zig	/e: void/;"	field
-        \\f	a.zig	/f: u32/;"	field
-        \\myFunction	a.zig	/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;"	function
-        \\x	a.zig	/const x = switch (e) {$/;"	constant
-        \\y	a.zig	/const y = switch (u) {$/;"	constant
-        \\y	b.zig	/var y = x + 1/;"	variable
+test "Tags.findTags skips import aliases and same-name field aliases" {
+    var test_dir = try std.fs.cwd().makeOpenPath("test-alias-filter", .{});
+    defer {
+        test_dir.close();
+        std.fs.cwd().deleteTree("test-alias-filter") catch unreachable;
+    }
+
+    const source =
+        \\const imported = @import("dep.zig");
+        \\
+        \\const Wrapper = struct {
+        \\    value: u8,
+        \\};
+        \\
+        \\const value = Wrapper.value;
+        \\const renamed = Wrapper.value;
         \\
     ;
+
+    const dep_source =
+        \\pub fn helper() void {}
+        \\
+    ;
+
+    try test_dir.writeFile(.{
+        .sub_path = "root.zig",
+        .data = source,
+    });
+    try test_dir.writeFile(.{
+        .sub_path = "dep.zig",
+        .data = dep_source,
+    });
+
+    var tags = Tags.init(std.testing.allocator);
+    defer tags.deinit();
+
+    const full_path = try test_dir.realpathAlloc(std.testing.allocator, "root.zig");
+    defer std.testing.allocator.free(full_path);
+    try tags.findTags(full_path);
+
+    const actual = try tags.write(std.testing.allocator, true);
+    defer std.testing.allocator.free(actual);
+
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "imported\ttest-alias-filter/root.zig\t/"));
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "value\ttest-alias-filter/root.zig\t/^const value = Wrapper.value/;\"\tconstant\n"));
+    try std.testing.expect(std.mem.indexOf(u8, actual, "renamed\ttest-alias-filter/root.zig\t/^const renamed = Wrapper.value/;\"\tconstant\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, actual, "helper\ttest-alias-filter/dep.zig\t/pub fn helper() void {}$/;\"\tfunction\n") != null);
+}
+
+test "Tags.read" {
+    const input =
+        "!_TAG_FILE_SORTED\t1\t/1 = sorted/\n" ++
+        "!_TAG_FILE_ENCODING\tutf-8\n" ++
+        "MyEnum\ta.zig\t/^const MyEnum = enum {$/;\"\tenum\n" ++
+        "MyStruct\ta.zig\t/^const MyStruct = struct {$/;\"\tstruct\n" ++
+        "MyUnion\ta.zig\t/^const MyUnion = union(enum) {$/;\"\tunion\n" ++
+        "a\ta.zig\t/a/;\"\tfield\n" ++
+        "anotherFunction\tb.zig\t/fn anotherFunction(x: u8) u8 {$/;\"\tfunction\n" ++
+        "b\ta.zig\t/b/;\"\tfield\n" ++
+        "c\ta.zig\t/c: u8/;\"\tfield\n" ++
+        "d\ta.zig\t/d: u8/;\"\tfield\n" ++
+        "e\ta.zig\t/e: void/;\"\tfield\n" ++
+        "f\ta.zig\t/f: u32/;\"\tfield\n" ++
+        "myFunction\ta.zig\t/^fn myFunction(s: MyStruct, e: MyEnum, u: MyUnion) u8 {$/;\"\tfunction\n" ++
+        "x\ta.zig\t/const x = switch (e) {$/;\"\tconstant\n" ++
+        "y\ta.zig\t/const y = switch (u) {$/;\"\tconstant\n" ++
+        "y\tb.zig\t/var y = x + 1/;\"\tvariable\n";
 
     var tags = Tags.init(std.testing.allocator);
     defer tags.deinit();
