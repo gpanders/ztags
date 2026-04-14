@@ -1,4 +1,5 @@
 const std = @import("std");
+const zzdoc = @import("zzdoc");
 
 const version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 1 };
 
@@ -47,13 +48,12 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    const docs_cmd = b.addSystemCommand(&.{"scdoc"});
-    docs_cmd.setStdIn(.{ .lazy_path = b.path("ztags.1.scd") });
-    const docs_out = docs_cmd.captureStdOut();
-    const docs = b.addInstallFileWithDir(docs_out, .{
-        .custom = b.pathJoin(&.{ "share", "man", "man1" }),
-    }, "ztags.1");
+    const manpages = zzdoc.addManpageStep(b, .{
+        .root_doc_dir = b.path("."),
+    });
+    const install_manpages = manpages.addInstallStep(.{});
+    b.getInstallStep().dependOn(&install_manpages.step);
 
     const docs_step = b.step("docs", "Build documentation");
-    docs_step.dependOn(&docs.step);
+    docs_step.dependOn(&install_manpages.step);
 }

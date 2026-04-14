@@ -1,6 +1,12 @@
 .{
     .name = .ztags,
     .version = "1.0.1",
+    .dependencies = .{
+        .zzdoc = .{
+            .url = "git+https://github.com/rockorager/zzdoc.git#a54223bdc13a80839ccf9f473edf3a171e777946",
+            .hash = "zzdoc-0.0.0-tzT1Ph7cAAC5YmXQXiBJHAg41_A5AUAC5VOm7ShnUxlz",
+        },
+    },
     .fingerprint = 0x3bb844495433ef57,
     .minimum_zig_version = "0.15.0",
     .paths = .{
@@ -8,5 +14,6 @@
         "build.zig.zon",
         "src",
         "LICENSE",
+        "ztags.1.scd",
     },
 }

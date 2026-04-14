@@ -15,7 +15,7 @@ messages but can be a bit slow. To build a release build use
 $ zig build -Doptimize=ReleaseSafe
 ```
 
-To build the man page (requires [scdoc][]), run
+To build the man page, run
 
 ```console
 $ zig build docs
@@ -30,8 +30,6 @@ use
 ```console
 $ zig build -Doptimize=ReleaseSafe -p $PREFIX install docs
 ```
-
-[scdoc]: https://sr.ht/~sircmpwn/scdoc/
 
 ## Usage
 
