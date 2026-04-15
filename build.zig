@@ -1,7 +1,6 @@
 const std = @import("std");
 const zzdoc = @import("zzdoc");
-
-const version: std.SemanticVersion = .{ .major = 1, .minor = 0, .patch = 1 };
+const version = @import("build.zig.zon").version;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -20,11 +19,7 @@ pub fn build(b: *std.Build) void {
 
     const options = b.addOptions();
     options.addOption([]const u8, "name", exe.name);
-    options.addOption([]const u8, "version", b.fmt("{d}.{d}.{d}", .{
-        version.major,
-        version.minor,
-        version.patch,
-    }));
+    options.addOption([]const u8, "version", version);
 
     root_module.addOptions("config", options);
 
