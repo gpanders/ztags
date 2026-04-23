@@ -7,7 +7,7 @@ abstract syntax tree of the source code.
 
 ## Building
 
-Clone this repository and build with Zig 0.15 or newer using `zig build`.
+Clone this repository and build with Zig 0.16 or newer using `zig build`.
 This will produce a `Debug` build by default, which generates useful error
 messages but can be a bit slow. To build a release build use
 

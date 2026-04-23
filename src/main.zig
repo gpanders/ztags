@@ -5,25 +5,21 @@ const config = @import("config");
 const Options = @import("Options.zig");
 const Tags = @import("Tags.zig");
 
-fn printStderr(comptime fmt: []const u8, args: anytype) void {
+pub fn main(init: std.process.Init) anyerror!u8 {
+    const io = init.io;
     var stderr_buffer: [1024]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
+    var stderr_writer = std.Io.File.stderr().writer(io, &stderr_buffer);
+    defer stderr_writer.flush() catch {};
+
     const stderr = &stderr_writer.interface;
-    stderr.print(fmt, args) catch return;
-    stderr.flush() catch {};
-}
 
-pub fn main() anyerror!u8 {
-    var base_allocator = switch (builtin.mode) {
-        .Debug => std.heap.GeneralPurposeAllocator(.{}){},
-        else => std.heap.ArenaAllocator.init(std.heap.page_allocator),
+    const allocator = switch (builtin.mode) {
+        .Debug => init.gpa,
+        else => init.arena.allocator(),
     };
-    defer _ = base_allocator.deinit();
-
-    var allocator = base_allocator.allocator();
 
     var options = a: {
-        break :a Options.parse(allocator) catch |err| switch (err) {
+        break :a Options.parse(stderr, allocator, init.minimal.args) catch |err| switch (err) {
             // Showing help or version information should not return an error
             // code
             error.ShowHelp, error.ShowVersion => return 0,
@@ -43,27 +39,27 @@ pub fn main() anyerror!u8 {
     defer tags.deinit();
 
     for (options.arguments) |fname| {
-        const full_fname = if (std.fs.path.isAbsolute(fname))
+        const full_fname: []const u8 = if (std.fs.path.isAbsolute(fname))
             try allocator.dupe(u8, fname)
         else
-            std.fs.cwd().realpathAlloc(allocator, fname) catch |err| switch (err) {
+            std.Io.Dir.cwd().realPathFileAlloc(io, fname, allocator) catch |err| switch (err) {
                 error.FileNotFound => {
-                    printStderr(
+                    stderr.print(
                         "{s}: Cannot open {s}: File not found.\n",
                         .{ config.name, fname },
-                    );
+                    ) catch {};
                     return 22; // EINVAL
                 },
                 else => return err,
             };
         defer allocator.free(full_fname);
 
-        tags.findTags(full_fname) catch |err| switch (err) {
+        tags.findTags(io, full_fname) catch |err| switch (err) {
             error.IsDir => {
-                printStderr(
+                stderr.print(
                     "{s}: {s} is a directory. Arguments must be Zig source files.\n",
                     .{ config.name, full_fname },
-                );
+                ) catch {};
                 return 22; // EINVAL
             },
             else => return err,
@@ -72,13 +68,13 @@ pub fn main() anyerror!u8 {
 
     if (std.mem.eql(u8, options.output, "-")) {
         var stdout_buffer: [4096]u8 = undefined;
-        var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
+        var stdout_writer = std.Io.File.stdout().writer(io, &stdout_buffer);
         const stdout = &stdout_writer.interface;
-        try tags.write(stdout, options.relative);
+        try tags.write(io, stdout, options.relative);
         try stdout.flush();
     } else {
         if (options.append) {
-            if (std.fs.cwd().readFileAlloc(allocator, options.output, std.math.maxInt(u32))) |contents| {
+            if (std.Io.Dir.cwd().readFileAlloc(io, options.output, allocator, .limited(std.math.maxInt(usize)))) |contents| {
                 defer allocator.free(contents);
                 try tags.read(contents);
             } else |err| switch (err) {
@@ -90,12 +86,12 @@ pub fn main() anyerror!u8 {
         var contents = std.Io.Writer.Allocating.init(allocator);
         defer contents.deinit();
 
-        try tags.write(&contents.writer, options.relative);
+        try tags.write(io, &contents.writer, options.relative);
 
         const data = try contents.toOwnedSlice();
         defer allocator.free(data);
 
-        try std.fs.cwd().writeFile(.{
+        try std.Io.Dir.cwd().writeFile(io, .{
             .sub_path = options.output,
             .data = data,
         });

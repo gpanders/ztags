@@ -3,14 +3,6 @@ const config = @import("config");
 
 const Options = @This();
 
-fn printStderr(comptime fmt: []const u8, args: anytype) void {
-    var stderr_buffer: [1024]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&stderr_buffer);
-    const stderr = &stderr_writer.interface;
-    stderr.print(fmt, args) catch return;
-    stderr.flush() catch {};
-}
-
 output: []const u8 = "",
 relative: bool = false,
 append: bool = false,
@@ -34,12 +26,12 @@ const Option = enum(u8) {
     }
 };
 
-fn usage() void {
-    printStderr("{s}", .{"Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n"});
+fn usage(stderr: *std.Io.Writer) void {
+    stderr.print("{s}", .{"Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n"}) catch {};
 }
 
-pub fn parse(allocator: std.mem.Allocator) !Options {
-    var it = try std.process.argsWithAllocator(allocator);
+pub fn parse(stderr: *std.Io.Writer, allocator: std.mem.Allocator, args: std.process.Args) !Options {
+    var it = try args.iterateAllocator(allocator);
     defer it.deinit();
 
     _ = it.skip();
@@ -47,14 +39,14 @@ pub fn parse(allocator: std.mem.Allocator) !Options {
     var errmsg: ?[]const u8 = null;
     return parseIter(allocator, &it, &errmsg) catch |err| {
         if (errmsg) |e| {
-            printStderr("{s}: {s}\n", .{ config.name, e });
+            try stderr.print("{s}: {s}\n", .{ config.name, e });
             allocator.free(e);
         }
 
         switch (err) {
-            error.ShowHelp, error.InvalidOption, error.MissingArgument => usage(),
+            error.ShowHelp, error.InvalidOption, error.MissingArgument => usage(stderr),
             error.ShowVersion => {
-                printStderr("{s} {s}\n", .{ config.name, config.version });
+                try stderr.print("{s} {s}\n", .{ config.name, config.version });
             },
             else => {},
         }

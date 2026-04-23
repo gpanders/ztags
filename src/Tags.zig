@@ -108,11 +108,11 @@ pub fn deinit(self: *Tags) void {
     self.visited.deinit();
 }
 
-fn readFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
-    const file = try std.fs.cwd().openFile(fname, .{});
-    defer file.close();
+fn readFile(io: std.Io, allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
+    const file = try std.Io.Dir.cwd().openFile(io, fname, .{});
+    defer file.close(io);
 
-    const metadata = try file.stat();
+    const metadata = try file.stat(io);
     const size = metadata.size;
     if (size == 0) {
         return null;
@@ -123,7 +123,7 @@ fn readFile(allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
     }
 
     var read_buffer: [4096]u8 = undefined;
-    var reader = file.reader(&read_buffer);
+    var reader = file.reader(io, &read_buffer);
 
     var source = try std.Io.Writer.Allocating.initCapacity(allocator, size + 1);
     errdefer source.deinit();
@@ -169,7 +169,7 @@ fn containerKind(tree: std.zig.Ast, node: std.zig.Ast.Node.Index) ?Kind {
     };
 }
 
-pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
+pub fn findTags(self: *Tags, io: std.Io, fname: []const u8) anyerror!void {
     const fname_ = try self.allocator.dupe(u8, fname);
     const gop = try self.visited.getOrPut(fname_);
     if (gop.found_existing) {
@@ -180,7 +180,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
     }
     gop.value_ptr.* = {};
 
-    const source = try readFile(self.allocator, fname_) orelse return;
+    const source = try readFile(io, self.allocator, fname_) orelse return;
     defer self.allocator.free(source);
 
     const allocator = self.allocator;
@@ -210,7 +210,7 @@ pub fn findTags(self: *Tags, fname: []const u8) anyerror!void {
                         const resolved = try std.fs.path.resolve(allocator, &.{import_fname});
                         defer allocator.free(resolved);
 
-                        self.findTags(resolved) catch |err| switch (err) {
+                        self.findTags(io, resolved) catch |err| switch (err) {
                             error.FileNotFound => continue,
                             else => return err,
                         };
@@ -356,7 +356,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
     }
 }
 
-pub fn write(self: *Tags, writer: *std.Io.Writer, relative: bool) !void {
+pub fn write(self: *Tags, io: std.Io, writer: *std.Io.Writer, relative: bool) !void {
     try writer.writeAll(
         "!_TAG_FILE_SORTED\t1\t/1 = sorted/\n" ++
             "!_TAG_FILE_ENCODING\tutf-8\n",
@@ -365,7 +365,7 @@ pub fn write(self: *Tags, writer: *std.Io.Writer, relative: bool) !void {
     try removeDuplicates(self.allocator, &self.entries);
 
     const cwd = if (relative)
-        try std.fs.realpathAlloc(self.allocator, ".")
+        try std.process.currentPathAlloc(io, self.allocator)
     else
         null;
     defer if (cwd) |c| self.allocator.free(c);
@@ -385,9 +385,13 @@ pub fn write(self: *Tags, writer: *std.Io.Writer, relative: bool) !void {
         defer escaped.deinit(self.allocator);
 
         const filename = if (cwd) |c| filename: {
+            if (!std.fs.path.isAbsolute(entry.filename)) {
+                break :filename entry.filename;
+            }
+
             const gop = try relative_paths.getOrPut(entry.filename);
             if (!gop.found_existing) {
-                gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, entry.filename);
+                gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, null, c, entry.filename);
             }
 
             break :filename gop.value_ptr.*;
@@ -402,10 +406,10 @@ pub fn write(self: *Tags, writer: *std.Io.Writer, relative: bool) !void {
     }
 }
 
-fn writeAlloc(tags: *Tags, allocator: std.mem.Allocator, relative: bool) ![]u8 {
+fn writeAlloc(tags: *Tags, allocator: std.mem.Allocator, io: std.Io, relative: bool) ![]u8 {
     var output = std.Io.Writer.Allocating.init(allocator);
     errdefer output.deinit();
-    try tags.write(&output.writer, relative);
+    try tags.write(io, &output.writer, relative);
     return try output.toOwnedSlice();
 }
 
@@ -487,7 +491,7 @@ test "removeDuplicates" {
         },
     };
 
-    var entries = EntryList{};
+    var entries: EntryList = .empty;
     try entries.appendSlice(allocator, &input);
     defer {
         for (entries.items) |entry| entry.deinit(allocator);
@@ -633,11 +637,8 @@ test "escape and unescape" {
 }
 
 test "Tags.findTags" {
-    var test_dir = try std.fs.cwd().makeOpenPath("test", .{});
-    defer {
-        test_dir.close();
-        std.fs.cwd().deleteTree("test") catch unreachable;
-    }
+    var test_dir = std.testing.tmpDir(.{});
+    defer test_dir.cleanup();
 
     const a_src =
         \\const b = @import("b.zig");
@@ -685,11 +686,11 @@ test "Tags.findTags" {
         \\
     ;
 
-    try test_dir.writeFile(.{
+    try test_dir.dir.writeFile(std.testing.io, .{
         .sub_path = "a.zig",
         .data = a_src,
     });
-    try test_dir.writeFile(.{
+    try test_dir.dir.writeFile(std.testing.io, .{
         .sub_path = "b.zig",
         .data = b_src,
     });
@@ -697,15 +698,16 @@ test "Tags.findTags" {
     var tags = Tags.init(std.testing.allocator);
     defer tags.deinit();
 
-    const full_path = try test_dir.realpathAlloc(std.testing.allocator, "a.zig");
+    const full_path = try test_dir.dir.realPathFileAlloc(std.testing.io, "a.zig", std.testing.allocator);
     defer std.testing.allocator.free(full_path);
-    try tags.findTags(full_path);
+    try tags.findTags(std.testing.io, full_path);
 
-    const cwd = try std.fs.cwd().openDir(".", .{});
-    try test_dir.setAsCwd();
-    defer cwd.setAsCwd() catch unreachable;
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    try std.process.setCurrentDir(std.testing.io, test_dir.dir);
+    defer std.process.setCurrentPath(std.testing.io, cwd) catch unreachable;
 
-    const actual = try writeAlloc(&tags, std.testing.allocator, true);
+    const actual = try writeAlloc(&tags, std.testing.allocator, std.testing.io, true);
     defer std.testing.allocator.free(actual);
 
     const golden =
@@ -730,11 +732,8 @@ test "Tags.findTags" {
 }
 
 test "Tags.findTags skips import aliases and same-name field aliases" {
-    var test_dir = try std.fs.cwd().makeOpenPath("test-alias-filter", .{});
-    defer {
-        test_dir.close();
-        std.fs.cwd().deleteTree("test-alias-filter") catch unreachable;
-    }
+    var test_dir = std.testing.tmpDir(.{});
+    defer test_dir.cleanup();
 
     const source =
         \\const imported = @import("dep.zig");
@@ -753,11 +752,11 @@ test "Tags.findTags skips import aliases and same-name field aliases" {
         \\
     ;
 
-    try test_dir.writeFile(.{
+    try test_dir.dir.writeFile(std.testing.io, .{
         .sub_path = "root.zig",
         .data = source,
     });
-    try test_dir.writeFile(.{
+    try test_dir.dir.writeFile(std.testing.io, .{
         .sub_path = "dep.zig",
         .data = dep_source,
     });
@@ -765,17 +764,22 @@ test "Tags.findTags skips import aliases and same-name field aliases" {
     var tags = Tags.init(std.testing.allocator);
     defer tags.deinit();
 
-    const full_path = try test_dir.realpathAlloc(std.testing.allocator, "root.zig");
+    const full_path = try test_dir.dir.realPathFileAlloc(std.testing.io, "root.zig", std.testing.allocator);
     defer std.testing.allocator.free(full_path);
-    try tags.findTags(full_path);
+    try tags.findTags(std.testing.io, full_path);
 
-    const actual = try writeAlloc(&tags, std.testing.allocator, true);
+    const cwd = try std.process.currentPathAlloc(std.testing.io, std.testing.allocator);
+    defer std.testing.allocator.free(cwd);
+    try std.process.setCurrentDir(std.testing.io, test_dir.dir);
+    defer std.process.setCurrentPath(std.testing.io, cwd) catch unreachable;
+
+    const actual = try writeAlloc(&tags, std.testing.allocator, std.testing.io, true);
     defer std.testing.allocator.free(actual);
 
-    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "imported\ttest-alias-filter/root.zig\t/"));
-    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "value\ttest-alias-filter/root.zig\t/^const value = Wrapper.value/;\"\tconstant\n"));
-    try std.testing.expect(std.mem.indexOf(u8, actual, "renamed\ttest-alias-filter/root.zig\t/^const renamed = Wrapper.value/;\"\tconstant\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, actual, "helper\ttest-alias-filter/dep.zig\t/pub fn helper() void {}$/;\"\tfunction\n") != null);
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "imported\troot.zig\t/"));
+    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "value\troot.zig\t/^const value = Wrapper.value/;\"\tconstant\n"));
+    try std.testing.expect(std.mem.indexOf(u8, actual, "renamed\troot.zig\t/^const renamed = Wrapper.value/;\"\tconstant\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, actual, "helper\tdep.zig\t/pub fn helper() void {}$/;\"\tfunction\n") != null);
 }
 
 test "Tags.read" {
@@ -801,7 +805,7 @@ test "Tags.read" {
     defer tags.deinit();
 
     try tags.read(input);
-    const output = try writeAlloc(&tags, std.testing.allocator, true);
+    const output = try writeAlloc(&tags, std.testing.allocator, std.testing.io, true);
     defer std.testing.allocator.free(output);
 
     try std.testing.expectEqualStrings(input, output);
