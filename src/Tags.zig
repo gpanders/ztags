@@ -33,12 +33,13 @@ const Kind = enum {
     }
 
     test "Kind.parse" {
-        inline for (std.meta.fields(Kind)) |field| {
-            const parsed = Kind.parse(field.name) orelse {
-                std.debug.print("Kind variant \"{s}\" missing in Kind.parse()\n", .{field.name});
+        const info = @typeInfo(Kind).@"enum";
+        inline for (info.field_names, info.field_values) |name, value| {
+            const parsed = Kind.parse(name) orelse {
+                std.debug.print("Kind variant \"{s}\" missing in Kind.parse()\n", .{name});
                 return error.MissingParseVariant;
             };
-            try std.testing.expectEqual(parsed, @as(Kind, @enumFromInt(field.value)));
+            try std.testing.expectEqual(@as(Kind, @fromBackingInt(value)), parsed);
         }
     }
 };
@@ -84,10 +85,10 @@ visited: std.StringHashMap(void),
 /// Static buffer for writing full paths.
 ///
 /// Data in this buffer is duplicated when passed to findTags.
-var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
 pub fn init(allocator: std.mem.Allocator) Tags {
-    return Tags{
+    return .{
         .allocator = allocator,
         .entries = .empty,
         .visited = std.StringHashMap(void).init(allocator),
@@ -106,9 +107,10 @@ pub fn deinit(self: *Tags) void {
         self.allocator.free(key.*);
     }
     self.visited.deinit();
+    self.* = undefined;
 }
 
-fn readFile(io: std.Io, allocator: std.mem.Allocator, fname: []const u8) !?[:0]const u8 {
+fn readFile(allocator: std.mem.Allocator, io: std.Io, fname: []const u8) !?[:0]const u8 {
     const file = try std.Io.Dir.cwd().openFile(io, fname, .{});
     defer file.close(io);
 
@@ -128,7 +130,8 @@ fn readFile(io: std.Io, allocator: std.mem.Allocator, fname: []const u8) !?[:0]c
     var source = try std.Io.Writer.Allocating.initCapacity(allocator, size + 1);
     errdefer source.deinit();
     _ = try reader.interface.streamRemaining(&source.writer);
-    return try source.toOwnedSliceSentinel(0);
+    const result = try source.toOwnedSliceSentinel(0);
+    return result;
 }
 
 fn parseName(name: []const u8) ?[]const u8 {
@@ -180,16 +183,16 @@ pub fn findTags(self: *Tags, io: std.Io, fname: []const u8) anyerror!void {
     }
     gop.value_ptr.* = {};
 
-    const source = try readFile(io, self.allocator, fname_) orelse return;
+    const source = try readFile(self.allocator, io, fname_) orelse return;
     defer self.allocator.free(source);
 
     const allocator = self.allocator;
-    var ast = try std.zig.Ast.parse(allocator, source, .zig);
+    var ast = try std.zig.Ast.parse(allocator, source, .{ .mode = .zig });
     defer ast.deinit(allocator);
 
     const tags = ast.nodes.items(.tag);
     for (tags, 0..) |tag, i| {
-        const node: std.zig.Ast.Node.Index = @enumFromInt(i);
+        const node: std.zig.Ast.Node.Index = @fromBackingInt(@intCast(i));
         var ident: ?[]const u8 = null;
         var kind: ?Kind = null;
 
@@ -201,13 +204,13 @@ pub fn findTags(self: *Tags, io: std.Io, fname: []const u8) anyerror!void {
             => {
                 if (importPath(ast, node)) |name| {
                     if (std.mem.endsWith(u8, name, ".zig")) {
-                        const dir = std.fs.path.dirname(fname_) orelse continue;
-                        const import_fname = try std.fmt.bufPrint(&path_buf, "{s}/{s}", .{
+                        const dir = std.Io.Dir.path.dirname(fname_) orelse continue;
+                        const import_fname = try std.mem.print(&path_buf, "{s}/{s}", .{
                             dir,
                             name,
                         });
 
-                        const resolved = try std.fs.path.resolve(allocator, &.{import_fname});
+                        const resolved = try std.Io.Dir.path.resolveAlloc(allocator, &.{import_fname});
                         defer allocator.free(resolved);
 
                         self.findTags(io, resolved) catch |err| switch (err) {
@@ -315,7 +318,7 @@ pub fn read(self: *Tags, data: []const u8) !void {
                         slice = slice[1..];
                     }
 
-                    if (std.mem.lastIndexOf(u8, slice, "/;\"")) |j| {
+                    if (std.mem.findLast(u8, slice, "/;\"")) |j| {
                         slice = slice[0..j];
                     }
 
@@ -385,13 +388,19 @@ pub fn write(self: *Tags, io: std.Io, writer: *std.Io.Writer, relative: bool) !v
         defer escaped.deinit(self.allocator);
 
         const filename = if (cwd) |c| filename: {
-            if (!std.fs.path.isAbsolute(entry.filename)) {
+            if (!std.Io.Dir.path.isAbsolute(entry.filename)) {
                 break :filename entry.filename;
             }
 
             const gop = try relative_paths.getOrPut(entry.filename);
             if (!gop.found_existing) {
-                gop.value_ptr.* = try std.fs.path.relative(self.allocator, c, null, c, entry.filename);
+                gop.value_ptr.* = try std.Io.Dir.path.relativeAlloc(
+                    self.allocator,
+                    c,
+                    null,
+                    c,
+                    entry.filename,
+                );
             }
 
             break :filename gop.value_ptr.*;
@@ -410,7 +419,8 @@ fn writeAlloc(tags: *Tags, allocator: std.mem.Allocator, io: std.Io, relative: b
     var output = std.Io.Writer.Allocating.init(allocator);
     errdefer output.deinit();
     try tags.write(io, &output.writer, relative);
-    return try output.toOwnedSlice();
+    const result = try output.toOwnedSlice();
+    return result;
 }
 
 /// Remove duplicates from an EntryList in place. Invalidates pointers.
@@ -522,7 +532,8 @@ fn getNodeText(
         "$"
     else
         "";
-    return try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
+    const result = try std.mem.concat(allocator, u8, &.{ start_of_line, text, end_of_line });
+    return result;
 }
 
 fn escape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSlice(u8) {
@@ -530,7 +541,7 @@ fn escape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSl
     const escaped_length = blk: {
         var count: usize = 0;
         var start: usize = 0;
-        while (std.mem.indexOfAnyPos(u8, text, start, escape_chars)) |i| {
+        while (std.mem.findAnyPos(u8, text, start, escape_chars)) |i| {
             count += 1;
             start = i + 1;
         }
@@ -546,7 +557,7 @@ fn escape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocatedSl
 
     var k: usize = 0;
     for (text) |c| {
-        if (std.mem.indexOfScalar(u8, escape_chars, c)) |_| {
+        if (std.mem.findScalar(u8, escape_chars, c)) |_| {
             escaped[k] = '\\';
             k += 1;
         }
@@ -564,7 +575,7 @@ fn unescape(allocator: std.mem.Allocator, text: []const u8) !OptionallyAllocated
     const unescaped_length = blk: {
         var count: usize = 0;
         var start: usize = 0;
-        while (std.mem.indexOfScalarPos(u8, text, start, '\\')) |i| {
+        while (std.mem.findScalarPos(u8, text, start, '\\')) |i| {
             count += 1;
             start = i + 2;
         }
@@ -776,10 +787,17 @@ test "Tags.findTags skips import aliases and same-name field aliases" {
     const actual = try writeAlloc(&tags, std.testing.allocator, std.testing.io, true);
     defer std.testing.allocator.free(actual);
 
-    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "imported\troot.zig\t/"));
-    try std.testing.expectEqual(@as(?usize, null), std.mem.indexOf(u8, actual, "value\troot.zig\t/^const value = Wrapper.value/;\"\tconstant\n"));
-    try std.testing.expect(std.mem.indexOf(u8, actual, "renamed\troot.zig\t/^const renamed = Wrapper.value/;\"\tconstant\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, actual, "helper\tdep.zig\t/pub fn helper() void {}$/;\"\tfunction\n") != null);
+    try std.testing.expectEqual(@as(?usize, null), std.mem.find(u8, actual, "imported\troot.zig\t/"));
+    try std.testing.expectEqual(
+        @as(?usize, null),
+        std.mem.find(u8, actual, "value\troot.zig\t/^const value = Wrapper.value/;\"\tconstant\n"),
+    );
+    try std.testing.expect(
+        std.mem.find(u8, actual, "renamed\troot.zig\t/^const renamed = Wrapper.value/;\"\tconstant\n") != null,
+    );
+    try std.testing.expect(
+        std.mem.find(u8, actual, "helper\tdep.zig\t/pub fn helper() void {}$/;\"\tfunction\n") != null,
+    );
 }
 
 test "Tags.read" {

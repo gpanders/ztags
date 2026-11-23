@@ -14,20 +14,10 @@ const Option = enum(u8) {
     append = 'a',
     version = 'V',
     help = 'h',
-
-    fn from(c: u8) ?Option {
-        inline for (std.meta.fields(Option)) |field| {
-            if (field.value == c) {
-                return @enumFromInt(c);
-            }
-        }
-
-        return null;
-    }
 };
 
-fn usage(stderr: *std.Io.Writer) void {
-    stderr.print("{s}", .{"Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n"}) catch {};
+fn usage(stderr: *std.Io.Writer) !void {
+    try stderr.print("{s}", .{"Usage: " ++ config.name ++ " [-o OUTPUT] [-a] [-r] FILES...\n"});
 }
 
 pub fn parse(stderr: *std.Io.Writer, allocator: std.mem.Allocator, args: std.process.Args) !Options {
@@ -44,7 +34,7 @@ pub fn parse(stderr: *std.Io.Writer, allocator: std.mem.Allocator, args: std.pro
         }
 
         switch (err) {
-            error.ShowHelp, error.InvalidOption, error.MissingArgument => usage(stderr),
+            error.ShowHelp, error.InvalidOption, error.MissingArgument => try usage(stderr),
             error.ShowVersion => {
                 try stderr.print("{s} {s}\n", .{ config.name, config.version });
             },
@@ -62,7 +52,7 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
         arguments.deinit(allocator);
     }
 
-    var options = Options{};
+    var options: Options = .{};
     errdefer if (options.output.len > 0) allocator.free(options.output);
 
     var next_option: ?Option = null;
@@ -70,15 +60,14 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
         if (std.mem.startsWith(u8, arg, "-") and arg.len > 1) {
             for (arg[1..]) |c| {
                 if (next_option) |opt| {
-                    errmsg.* = try std.fmt.allocPrint(
-                        allocator,
+                    errmsg.* = try allocator.print(
                         "Option '{c}' missing required argument.",
-                        .{@intFromEnum(opt)},
+                        .{@backingInt(opt)},
                     );
                     return error.MissingArgument;
                 }
 
-                if (Option.from(c)) |opt| {
+                if (std.enums.fromInt(Option, c)) |opt| {
                     switch (opt) {
                         .output => next_option = opt,
                         .relative => options.relative = true,
@@ -87,7 +76,7 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
                         .version => return error.ShowVersion,
                     }
                 } else {
-                    errmsg.* = try std.fmt.allocPrint(allocator, "Unexpected option: '{c}'.", .{c});
+                    errmsg.* = try allocator.print("Unexpected option: '{c}'.", .{c});
                     return error.InvalidOption;
                 }
             }
@@ -107,10 +96,9 @@ fn parseIter(allocator: std.mem.Allocator, iter: anytype, errmsg: *?[]const u8) 
     }
 
     if (next_option) |opt| {
-        errmsg.* = try std.fmt.allocPrint(
-            allocator,
+        errmsg.* = try allocator.print(
             "Option '{c}' missing required argument.",
-            .{@intFromEnum(opt)},
+            .{@backingInt(opt)},
         );
         return error.MissingArgument;
     }
@@ -139,16 +127,14 @@ const TestIterator = struct {
     args: []const []const u8,
     index: usize,
 
-    const Self = @This();
-
-    fn init(args: []const []const u8) Self {
-        return Self{
+    fn init(args: []const []const u8) TestIterator {
+        return .{
             .args = args,
             .index = 0,
         };
     }
 
-    fn next(self: *Self) ?[]const u8 {
+    fn next(self: *TestIterator) ?[]const u8 {
         if (self.index < self.args.len) {
             defer self.index += 1;
             return self.args[self.index];

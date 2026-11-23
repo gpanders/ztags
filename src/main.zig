@@ -14,7 +14,7 @@ pub fn main(init: std.process.Init) anyerror!u8 {
     const stderr = &stderr_writer.interface;
 
     const allocator = switch (builtin.mode) {
-        .Debug => init.gpa,
+        .debug => init.gpa,
         else => init.arena.allocator(),
     };
 
@@ -39,15 +39,15 @@ pub fn main(init: std.process.Init) anyerror!u8 {
     defer tags.deinit();
 
     for (options.arguments) |fname| {
-        const full_fname: []const u8 = if (std.fs.path.isAbsolute(fname))
-            try allocator.dupe(u8, fname)
+        const full_fname: [:0]const u8 = if (std.Io.Dir.path.isAbsolute(fname))
+            try allocator.dupeSentinel(u8, fname, 0)
         else
             std.Io.Dir.cwd().realPathFileAlloc(io, fname, allocator) catch |err| switch (err) {
                 error.FileNotFound => {
-                    stderr.print(
+                    try stderr.print(
                         "{s}: Cannot open {s}: File not found.\n",
                         .{ config.name, fname },
-                    ) catch {};
+                    );
                     return 22; // EINVAL
                 },
                 else => return err,
@@ -56,10 +56,10 @@ pub fn main(init: std.process.Init) anyerror!u8 {
 
         tags.findTags(io, full_fname) catch |err| switch (err) {
             error.IsDir => {
-                stderr.print(
+                try stderr.print(
                     "{s}: {s} is a directory. Arguments must be Zig source files.\n",
                     .{ config.name, full_fname },
-                ) catch {};
+                );
                 return 22; // EINVAL
             },
             else => return err,
@@ -74,7 +74,8 @@ pub fn main(init: std.process.Init) anyerror!u8 {
         try stdout.flush();
     } else {
         if (options.append) {
-            if (std.Io.Dir.cwd().readFileAlloc(io, options.output, allocator, .limited(std.math.maxInt(usize)))) |contents| {
+            const limit: std.Io.Limit = .limited(std.math.maxInt(usize));
+            if (std.Io.Dir.cwd().readFileAlloc(io, options.output, allocator, limit)) |contents| {
                 defer allocator.free(contents);
                 try tags.read(contents);
             } else |err| switch (err) {

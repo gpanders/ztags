@@ -27,9 +27,7 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
@@ -43,10 +41,11 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    const manpages = zzdoc.addManpageStep(b, .{
-        .root_doc_dir = b.path("."),
+    const install_manpages = b.addInstallDirectory(.{
+        .source_dir = zzdoc.addManpages(b, b.path(".")),
+        .install_dir = .prefix,
+        .install_subdir = "share/man",
     });
-    const install_manpages = manpages.addInstallStep(.{});
     b.getInstallStep().dependOn(&install_manpages.step);
 
     const docs_step = b.step("docs", "Build documentation");

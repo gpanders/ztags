@@ -7,12 +7,12 @@ abstract syntax tree of the source code.
 
 ## Building
 
-Clone this repository and build with Zig 0.16 or newer using `zig build`.
-This will produce a `Debug` build by default, which generates useful error
+Clone this repository and build with Zig 0.17 or newer using `zig build`.
+This will produce a `debug` build by default, which generates useful error
 messages but can be a bit slow. To build a release build use
 
 ```console
-$ zig build -Doptimize=ReleaseSafe
+$ zig build -Doptimize=safe
 ```
 
 To build the man page, run
@@ -28,7 +28,7 @@ To build and install both `ztags` and the man page to `$PREFIX` simultaneously,
 use
 
 ```console
-$ zig build -Doptimize=ReleaseSafe -p $PREFIX install docs
+$ zig build -Doptimize=safe -p $PREFIX install docs
 ```
 
 ## Usage
