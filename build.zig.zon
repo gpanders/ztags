@@ -1,6 +1,6 @@
 .{
     .name = .ztags,
-    .version = "1.0.2",
+    .version = "1.0.3",
     .dependencies = .{
         .zzdoc = .{
             .url = "git+https://github.com/rockorager/zzdoc.git#7bf0486bfaace525d440dccf9c91783c9af056cd",
