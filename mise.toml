@@ -1,0 +1,4 @@
+[tools]
+zig = "0.17"
+zls = "0.17"
+"github:rockorager/ziglint" = "latest"
